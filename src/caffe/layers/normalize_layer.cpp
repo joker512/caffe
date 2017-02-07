@@ -38,7 +38,7 @@ namespace caffe {
         } else {
             this->blobs_.resize(1);
             if (channel_shared_) {
-                this->blobs_[0].reset(new Blob<Dtype>(vector<int>(0)));
+                this->blobs_[0].reset(new Blob<Dtype>(vector<int>(1, 1)));
             } else {
                 this->blobs_[0].reset(new Blob<Dtype>(vector<int>(1, channels)));
             }

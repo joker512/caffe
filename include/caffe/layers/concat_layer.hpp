@@ -79,6 +79,7 @@ class ConcatLayer : public Layer<Dtype> {
   int count_;
   int num_concats_;
   int concat_input_size_;
+  int concat_output_size_;
   int concat_axis_;
 };
 

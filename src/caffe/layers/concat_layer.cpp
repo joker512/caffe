@@ -32,21 +32,19 @@ void ConcatLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
   // Initialize with the first blob.
   vector<int> top_shape = bottom[0]->shape();
   num_concats_ = bottom[0]->count(0, concat_axis_);
-  concat_input_size_ = bottom[0]->count(concat_axis_ + 1);
-  int bottom_count_sum = bottom[0]->count();
   for (int i = 1; i < bottom.size(); ++i) {
     CHECK_EQ(num_axes, bottom[i]->num_axes())
         << "All inputs must have the same #axes.";
     for (int j = 0; j < num_axes; ++j) {
       if (j == concat_axis_) { continue; }
-      CHECK_EQ(top_shape[j], bottom[i]->shape(j))
-          << "All inputs must have the same shape, except at concat_axis.";
+      if (top_shape[j] < bottom[i]->shape(j)) {
+        top_shape[j] = bottom[i]->shape(j);
+      }
     }
-    bottom_count_sum += bottom[i]->count();
     top_shape[concat_axis_] += bottom[i]->shape(concat_axis_);
   }
   top[0]->Reshape(top_shape);
-  CHECK_EQ(bottom_count_sum, top[0]->count());
+  concat_output_size_ = top[0]->count(concat_axis_ + 1);
   if (bottom.size() == 1) {
     top[0]->ShareData(*bottom[0]);
     top[0]->ShareDiff(*bottom[0]);
@@ -60,14 +58,21 @@ void ConcatLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   Dtype* top_data = top[0]->mutable_cpu_data();
   int offset_concat_axis = 0;
   const int top_concat_axis = top[0]->shape(concat_axis_);
+  caffe_set(top[0]->count(), (Dtype)0., top[0]->mutable_cpu_data());
   for (int i = 0; i < bottom.size(); ++i) {
     const Dtype* bottom_data = bottom[i]->cpu_data();
     const int bottom_concat_axis = bottom[i]->shape(concat_axis_);
+    const int concat_input_size_ = bottom[i]->count(concat_axis_ + 1);
+    const int padY = (top[0]->shape(2) - bottom[i]->shape(2)) / 2;
+    const int padX = (top[0]->shape(3) - bottom[i]->shape(3)) / 2;
     for (int n = 0; n < num_concats_; ++n) {
-      caffe_copy(bottom_concat_axis * concat_input_size_,
-          bottom_data + n * bottom_concat_axis * concat_input_size_,
-          top_data + (n * top_concat_axis + offset_concat_axis)
-              * concat_input_size_);
+      for(int c = 0; c < bottom[i]->shape(1); ++c) {
+        for(int j = 0; j < bottom[i]->shape(2); ++j) {
+          caffe_copy(bottom[i]->shape(3),
+            bottom_data + (n * bottom_concat_axis + c) * concat_input_size_ + j * bottom[i]->shape(3),
+            top_data + (n * top_concat_axis + offset_concat_axis + c) * concat_output_size_ + (j + padY) * top[0]->shape(3) + padX);
+        }
+      }
     }
     offset_concat_axis += bottom_concat_axis;
   }
@@ -84,10 +89,17 @@ void ConcatLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& top,
     const int bottom_concat_axis = bottom[i]->shape(concat_axis_);
     if (propagate_down[i]) {
       Dtype* bottom_diff = bottom[i]->mutable_cpu_diff();
+      const int concat_input_size_ = bottom[i]->count(concat_axis_ + 1);
+      const int padY = (top[0]->shape(2) - bottom[i]->shape(2)) / 2;
+      const int padX = (top[0]->shape(3) - bottom[i]->shape(3)) / 2;
       for (int n = 0; n < num_concats_; ++n) {
-        caffe_copy(bottom_concat_axis * concat_input_size_, top_diff +
-            (n * top_concat_axis + offset_concat_axis) * concat_input_size_,
-            bottom_diff + n * bottom_concat_axis * concat_input_size_);
+        for(int c = 0; c < bottom[i]->shape(1); ++c) {
+          for(int j = 0; j < bottom[i]->shape(2); ++j) {
+            caffe_copy(bottom[i]->shape(3),
+              top_diff + (n * top_concat_axis + offset_concat_axis + c) * concat_output_size_ + (j + padY) * top[0]->shape(3) + padX,
+              bottom_diff + (n * bottom_concat_axis + c) * concat_input_size_ + j * bottom[i]->shape(3));
+          }
+        }
       }
     }
     offset_concat_axis += bottom_concat_axis;

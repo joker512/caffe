@@ -23,6 +23,7 @@ void Blob<Dtype>::Reshape(const int num, const int channels, const int height,
 
 template <typename Dtype>
 void Blob<Dtype>::Reshape(const vector<int>& shape) {
+  CHECK(shape.size());
   CHECK_LE(shape.size(), kMaxBlobAxes);
   count_ = 1;
   shape_.resize(shape.size());

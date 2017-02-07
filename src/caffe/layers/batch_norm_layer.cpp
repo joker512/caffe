@@ -22,14 +22,14 @@ void BatchNormLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   if (this->blobs_.size() > 0) {
     LOG(INFO) << "Skipping parameter initialization";
   } else {
-    this->blobs_.resize(3);
+    this->blobs_.resize(4);
     vector<int> sz;
     sz.push_back(channels_);
     this->blobs_[0].reset(new Blob<Dtype>(sz));
     this->blobs_[1].reset(new Blob<Dtype>(sz));
-    sz[0] = 1;
     this->blobs_[2].reset(new Blob<Dtype>(sz));
-    for (int i = 0; i < 3; ++i) {
+    this->blobs_[3].reset(new Blob<Dtype>(sz));
+    for (int i = 0; i < 4; ++i) {
       caffe_set(this->blobs_[i]->count(), Dtype(0),
                 this->blobs_[i]->mutable_cpu_data());
     }
@@ -57,8 +57,10 @@ void BatchNormLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& bottom,
 
   vector<int> sz;
   sz.push_back(channels_);
-  mean_.Reshape(sz);
-  variance_.Reshape(sz);
+  this->blobs_[0]->Reshape(sz);
+  this->blobs_[1]->Reshape(sz);
+  this->blobs_[2]->Reshape(sz);
+  this->blobs_[3]->Reshape(sz);
   temp_.ReshapeLike(*bottom[0]);
   x_norm_.ReshapeLike(*bottom[0]);
   sz[0] = bottom[0]->shape(0);
@@ -97,12 +99,12 @@ void BatchNormLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
 
   if (use_global_stats_) {
     // use the stored mean/variance estimates.
-    const Dtype scale_factor = this->blobs_[2]->cpu_data()[0] == 0 ?
+    /*const Dtype scale_factor = this->blobs_[2]->cpu_data()[0] == 0 ?
         0 : 1 / this->blobs_[2]->cpu_data()[0];
     caffe_cpu_scale(variance_.count(), scale_factor,
         this->blobs_[0]->cpu_data(), mean_.mutable_cpu_data());
     caffe_cpu_scale(variance_.count(), scale_factor,
-        this->blobs_[1]->cpu_data(), variance_.mutable_cpu_data());
+        this->blobs_[1]->cpu_data(), variance_.mutable_cpu_data());*/
   } else {
     // compute mean
     caffe_cpu_gemv<Dtype>(CblasNoTrans, channels_ * num, spatial_dim,
@@ -116,7 +118,7 @@ void BatchNormLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
 
   // subtract mean
   caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num, channels_, 1, 1,
-      batch_sum_multiplier_.cpu_data(), mean_.cpu_data(), 0.,
+      batch_sum_multiplier_.cpu_data(), this->blobs_[0]->cpu_data(), 0.,
       num_by_chans_.mutable_cpu_data());
   caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_ * num,
       spatial_dim, 1, -1, num_by_chans_.cpu_data(),
@@ -147,18 +149,34 @@ void BatchNormLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   }
 
   // normalize variance
-  caffe_add_scalar(variance_.count(), eps_, variance_.mutable_cpu_data());
-  caffe_powx(variance_.count(), variance_.cpu_data(), Dtype(0.5),
-             variance_.mutable_cpu_data());
+  //caffe_powx(this->blobs_[1]->count(), this->blobs_[1]->cpu_data(), Dtype(0.5),
+  //           this->blobs_[1]->mutable_cpu_data());
+  caffe_mul(this->blobs_[1]->count(), this->blobs_[2]->cpu_data(), this->blobs_[1]->cpu_data(), this->blobs_[1]->mutable_cpu_data());
+  caffe_add_scalar(this->blobs_[1]->count(), (Dtype)-1.414213 * eps_, this->blobs_[1]->mutable_cpu_data());
 
   // replicate variance to input size
   caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num, channels_, 1, 1,
-      batch_sum_multiplier_.cpu_data(), variance_.cpu_data(), 0.,
+      batch_sum_multiplier_.cpu_data(), this->blobs_[1]->cpu_data(), 0.,
       num_by_chans_.mutable_cpu_data());
   caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_ * num,
       spatial_dim, 1, 1., num_by_chans_.cpu_data(),
       spatial_sum_multiplier_.cpu_data(), 0., temp_.mutable_cpu_data());
-  caffe_div(temp_.count(), top_data, temp_.cpu_data(), top_data);
+  caffe_mul(temp_.count(), top_data, temp_.cpu_data(), top_data);
+
+  /*caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num, channels_, 1, 1,
+      batch_sum_multiplier_.cpu_data(), this->blobs_[2]->cpu_data(), 0.,
+      num_by_chans_.mutable_cpu_data());
+  caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_ * num,
+      spatial_dim, 1, 1., num_by_chans_.cpu_data(),
+      spatial_sum_multiplier_.cpu_data(), 0., temp_.mutable_cpu_data());
+  caffe_mul(temp_.count(), top_data, temp_.cpu_data(), top_data);*/
+
+  caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, num, channels_, 1, 1,
+      batch_sum_multiplier_.cpu_data(), this->blobs_[3]->cpu_data(), 0.,
+      num_by_chans_.mutable_cpu_data());
+  caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_ * num,
+      spatial_dim, 1, 1., num_by_chans_.cpu_data(),
+      spatial_sum_multiplier_.cpu_data(), 1., top_data);
   // TODO(cdoersch): The caching is only needed because later in-place layers
   //                 might clobber the data.  Can we skip this if they won't?
   caffe_copy(x_norm_.count(), top_data,
