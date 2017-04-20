@@ -238,7 +238,7 @@ void rotate(cv::Mat& src, int angle) {
     // adjust transformation matrix
     rot.at<double>(0, 2) += bbox.width / 2.0 - center.x;
     rot.at<double>(1, 2) += bbox.height / 2.0 - center.y;
-    cv::warpAffine(src, src, rot, bbox.size());
+    cv::warpAffine(src, src, rot, src.size());
 }
 
 void resize(cv::Mat& cv_img, int smallest_side) {
@@ -266,6 +266,11 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& img,
   const int min_side_min = param_.min_side_min();
   const int min_side_max = param_.min_side_max();
   const int crop_size = param_.crop_size();
+  int crop_size_w = param_.crop_size_w();
+  int crop_size_h = param_.crop_size_h();
+  if (crop_size_w <= 0 || crop_size_h <= 0) {
+    crop_size_w = crop_size_h = crop_size;
+  }
   const int rotation_angle = param_.max_rotation_angle();
   const float min_contrast = param_.min_contrast();
   const float max_contrast = param_.max_contrast();
@@ -413,18 +418,18 @@ void DataTransformer<Dtype>::Transform(const cv::Mat& img,
   int h_off = 0;
   int w_off = 0;
   cv::Mat cv_cropped_img = cv_img;
-  if (crop_size) {
-    CHECK_EQ(crop_size, height);
-    CHECK_EQ(crop_size, width);
+  if (crop_size || crop_size_w) {
+    CHECK_EQ(crop_size_h, height);
+    CHECK_EQ(crop_size_w, width);
     // We only do random crop when we do training.
     if (phase_ == TRAIN) {
-      h_off = Rand(img_height - crop_size + 1);
-      w_off = Rand(img_width - crop_size + 1);
+      h_off = Rand(img_height - crop_size_h + 1);
+      w_off = Rand(img_width - crop_size_w + 1);
     } else {
-      h_off = (img_height - crop_size) / 2;
-      w_off = (img_width - crop_size) / 2;
+      h_off = (img_height - crop_size_h) / 2;
+      w_off = (img_width - crop_size_w) / 2;
     }
-    cv::Rect roi(w_off, h_off, crop_size, crop_size);
+    cv::Rect roi(w_off, h_off, crop_size_w, crop_size_h);
     cv_cropped_img = cv_img(roi);
   } else {
     CHECK_EQ(img_height, height);
