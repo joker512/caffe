@@ -176,7 +176,6 @@ DEFINE_CAFFE_CPU_UNARY_FUNC(sign, y[i] = caffe_sign<Dtype>(x[i]))
 DEFINE_CAFFE_CPU_UNARY_FUNC(if_zerout, y[i] = caffe_if_zerout<Dtype>(x[i]));
 DEFINE_CAFFE_CPU_UNARY_FUNC(if_nonzerout, y[i] = caffe_if_nonzerout<Dtype>(x[i]));
 DEFINE_CAFFE_CPU_UNARY_FUNC(eltwise_multi, y[i] = y[i]*x[i]);
-DEFINE_CAFFE_CPU_UNARY_FUNC(sign, y[i] = caffe_sign<Dtype>(x[i]))
 
 // This returns a nonzero value if the input has its sign bit set.
 // The name sngbit is meant to avoid conflicts with std::signbit in the macro.

@@ -119,6 +119,8 @@ const Dtype* Blob<Dtype>::gpu_connectivity() const {
   CHECK(connectivity_);
   return (const Dtype*)connectivity_->gpu_data();
 }
+
+template <typename Dtype>
 void Blob<Dtype>::set_gpu_data(Dtype* data) {
   CHECK(data);
   // Make sure CPU and GPU sizes remain equal

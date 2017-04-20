@@ -428,13 +428,10 @@ template <typename Dtype>
 inline Dtype Layer<Dtype>::Forward(const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
   Dtype loss = 0;
-  Timer timer;
   Reshape(bottom, top);
   switch (Caffe::mode()) {
   case Caffe::CPU:
-	timer.Start();
     Forward_cpu(bottom, top);
-    timer.Stop();
     for (int top_id = 0; top_id < top.size(); ++top_id) {
       if (!this->loss(top_id)) { continue; }
       const int count = top[top_id]->count();
@@ -444,9 +441,7 @@ inline Dtype Layer<Dtype>::Forward(const vector<Blob<Dtype>*>& bottom,
     }
     break;
   case Caffe::GPU:
-	timer.Start();
     Forward_gpu(bottom, top);
-    timer.Stop();
 #ifndef CPU_ONLY
     for (int top_id = 0; top_id < top.size(); ++top_id) {
       if (!this->loss(top_id)) { continue; }
@@ -462,9 +457,6 @@ inline Dtype Layer<Dtype>::Forward(const vector<Blob<Dtype>*>& bottom,
   default:
     LOG(FATAL) << "Unknown caffe mode.";
   }
-  test_time_ = timer.MicroSeconds();
-  Unlock();
-  //LOG(INFO)<<"Test time of "<< layer_param_.name()<<":\t"<< (test_time_/1000)<<"\t\tms";
   return loss;
 }
 

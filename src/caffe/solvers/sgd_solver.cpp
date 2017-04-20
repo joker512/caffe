@@ -102,7 +102,6 @@ template <typename Dtype>
 void SGDSolver<Dtype>::ApplyUpdate() {
   Dtype rate = GetLearningRate();
   if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
-<<<<<<< HEAD
     LOG(INFO) << "Iteration " << this->iter_ << ", lr = " << rate;
 
     //display sparsity
