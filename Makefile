@@ -419,7 +419,7 @@ LIBRARY_DIRS += $(BLAS_LIB)
 LIBRARY_DIRS += $(LIB_BUILD_DIR)
 
 # Automatic dependency generation (nvcc is handled separately)
-CXXFLAGS += -MMD -MP
+CXXFLAGS += -std=c++14 -MMD -MP
 
 #openmp
 #CXXFLAGS += -fopenmp

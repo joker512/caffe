@@ -27,6 +27,7 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
   const int new_height = this->layer_param_.image_data_param().new_height();
   const int new_width  = this->layer_param_.image_data_param().new_width();
+  const int labels_count = this->layer_param_.image_data_param().labels_count();
   const bool is_color  = this->layer_param_.image_data_param().is_color();
   string root_folder = this->layer_param_.image_data_param().root_folder();
 
@@ -39,11 +40,15 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
   std::ifstream infile(source.c_str());
   string line;
   size_t pos;
-  int label;
   while (std::getline(infile, line)) {
-    pos = line.find_last_of(' ');
-    label = atoi(line.substr(pos + 1).c_str());
-    lines_.push_back(std::make_pair(line.substr(0, pos), label));
+    std::vector<int> labels;
+    for (int i = 0;i < labels_count;i++) {
+        pos = line.find_last_of(' ');
+        labels.push_back(atoi(line.substr(pos + 1).c_str()));
+        line = line.substr(0, pos);
+    }
+    std::reverse(labels.begin(), labels.end());
+    lines_.push_back(std::make_pair(line, labels));
   }
 
   CHECK(!lines_.empty()) << "File is empty";
@@ -91,7 +96,9 @@ void ImageDataLayer<Dtype>::DataLayerSetUp(const vector<Blob<Dtype>*>& bottom,
       << top[0]->channels() << "," << top[0]->height() << ","
       << top[0]->width();
   // label
-  vector<int> label_shape(1, batch_size);
+  vector<int> label_shape;
+  label_shape.push_back(batch_size);
+  label_shape.push_back(labels_count);
   top[1]->Reshape(label_shape);
   for (int i = 0; i < this->prefetch_.size(); ++i) {
     this->prefetch_[i]->label_.Reshape(label_shape);
@@ -119,6 +126,8 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
   const int batch_size = image_data_param.batch_size();
   const int new_height = image_data_param.new_height();
   const int new_width = image_data_param.new_width();
+  const int read_height = image_data_param.read_height();
+  const int read_width = image_data_param.read_width();
   const bool is_color = image_data_param.is_color();
   string root_folder = image_data_param.root_folder();
 
@@ -144,7 +153,7 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     timer.Start();
     CHECK_GT(lines_size, lines_id_);
     cv::Mat cv_img = ReadImageToCVMat(root_folder + lines_[lines_id_].first,
-        new_height, new_width, is_color);
+        read_height, read_width, is_color);
     CHECK(cv_img.data) << "Could not load " << lines_[lines_id_].first;
     read_time += timer.MicroSeconds();
     timer.Start();
@@ -154,7 +163,10 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     this->data_transformer_->Transform(cv_img, &(this->transformed_data_));
     trans_time += timer.MicroSeconds();
 
-    prefetch_label[item_id] = lines_[lines_id_].second;
+    int label_offset = batch->label_.offset(item_id);
+    for (int i = 0;i < (int)lines_[lines_id_].second.size();i++) {
+        prefetch_label[label_offset + i] = lines_[lines_id_].second[i];
+    }
     // go to the next iter
     lines_id_++;
     if (lines_id_ >= lines_size) {
@@ -167,9 +179,9 @@ void ImageDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
     }
   }
   batch_timer.Stop();
-  DLOG(INFO) << "Prefetch batch: " << batch_timer.MilliSeconds() << " ms.";
-  DLOG(INFO) << "     Read time: " << read_time / 1000 << " ms.";
-  DLOG(INFO) << "Transform time: " << trans_time / 1000 << " ms.";
+  //LOG(INFO) << "Prefetch batch: " << batch_timer.MilliSeconds() << " ms.";
+  //LOG(INFO) << "     Read time: " << read_time / 1000 << " ms.";
+  //LOG(INFO) << "Transform time: " << trans_time / 1000 << " ms.";
 }
 
 INSTANTIATE_CLASS(ImageDataLayer);
