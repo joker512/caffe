@@ -100,7 +100,6 @@ void SGDSolver<Dtype>::ClipGradients() {
 
 template <typename Dtype>
 void SGDSolver<Dtype>::ApplyUpdate() {
-  CHECK(Caffe::root_solver());
   Dtype rate = GetLearningRate();
   if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
     LOG(INFO) << "Iteration " << this->iter_ << ", lr = " << rate;
@@ -156,6 +155,8 @@ void SGDSolver<Dtype>::ApplyUpdate() {
 	if (this->param_.print_sparsity())
 		LOG(INFO) << sparsity_msg_stream.str();
 
+    LOG_IF(INFO, Caffe::root_solver()) << "Iteration " << this->iter_
+        << ", lr = " << rate;
   }
 
   ClipGradients();
