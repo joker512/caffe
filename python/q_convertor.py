@@ -38,9 +38,14 @@ else:
     is_fc = False
     for i in xrange(len(net._layer_names)):
         if net._layer_names[i] == args.layer:
-            layer = net_params.layers[i]
-            layer.ClearField('blobs_lr')
-            layer.ClearField('weight_decay')
+            index, layer = next((j, e) for j, e in enumerate(net_params.layer) if e.name == args.layer)
+            if not layer.top[0].endswith("_"):
+                layer.top[0] += "_"
+                net_params.layer[index + 1].bottom[0] += "_"
+            if hasattr(layer, 'blobs_lr'):
+                layer.ClearField('blobs_lr')
+            if hasattr(layer, 'weight_decay'):
+                layer.ClearField('weight_decay')
             if net.layers[i].type == 'Convolution':
                 in_channels = weights.shape[1]
                 weights = weights.transpose((0, 2, 3, 1)).reshape((-1, in_channels))

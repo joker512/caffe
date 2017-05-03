@@ -705,10 +705,14 @@ message ConvolutionParameter {
     LOWERED_CCNMM = 2;  //removing all-zero rows & columns and ConCateNating remaining ones, then do gemm. GPU mode is implemented with partial CPU subroutines :(. 
     DIRECT_SCONV = 3;  //direct convolution on tensors without lowering, harnessing sparsity. More in intel branch
     DIRECT_DCONV = 4;  //direct convolution on tensors without lowering, dense format. More in intel branch
+    SINGLE_K = 5;
+    SINGLE_POS = 6;
   }
   optional ConvMode conv_mode = 21 [default = LOWERED_GEMM];
 
   optional uint32 k = 22 [default = 32];
+  optional uint32 for_k = 24;
+  optional uint32 for_pos = 25;
   optional uint32 m = 23 [default = 4];
 }
 

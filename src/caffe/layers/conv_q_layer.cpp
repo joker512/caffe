@@ -12,6 +12,9 @@ namespace caffe {
 		conv_out_spatial_dim_ =  top[0]->count(this->channel_axis_ + 1);
 		conv_in_spatial_dim_ = bottom[0]->count(this->channel_axis_ + 1);
 		K = this->layer_param_.convolution_param().k();
+		int conv_mode = this->layer_param_.convolution_param().conv_mode();
+		K_only = conv_mode == ConvolutionParameter_ConvMode_SINGLE_K ? this->layer_param_.convolution_param().for_k() : -1;
+		pos_only = conv_mode == ConvolutionParameter_ConvMode_SINGLE_POS ? this->layer_param_.convolution_param().for_pos() : -1;
 		M = this->layer_param_.convolution_param().m();
 		const int BITS = (int)log2(K);
 		const int TOTAL_BITS = 32;
@@ -94,6 +97,8 @@ namespace caffe {
 
 							for (int kernel_col = 0; kernel_col < kernel_w; ++kernel_col) {
 								int b = b_kernel_row[kernel_col];
+								if (K_only != -1 && b != K_only || pos_only != -1 && kernel_row * kernel_w + kernel_col != pos_only)
+									continue;
 								int input_row = -pad_h + kernel_row * dilation_h;
 								const Dtype* cache_row = &this->cache_.cpu_data()[b * conv_in_spatial_dim_];
 

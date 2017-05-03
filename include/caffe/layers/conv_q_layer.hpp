@@ -31,6 +31,8 @@ private:
 	int conv_in_spatial_dim_;
 	int K;
 	int M;
+	int K_only;
+	int pos_only;
 };
 
 }

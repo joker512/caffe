@@ -647,6 +647,11 @@ $(EXAMPLE_BINS): %.bin : %.o | $(DYNAMIC_NAME)
 	$(Q)$(CXX) $< -o $@ $(LINKFLAGS) -l$(LIBRARY_NAME) $(LDFLAGS) \
 		-Wl,-rpath,$(ORIGIN)/../../lib
 
+$(BUILD_DIR)/examples/optimize_quantize/optimize_weights.bin: $(BUILD_DIR)/examples/optimize_quantize/optimize_weights.o $(BUILD_DIR)/cuda/examples/optimize_quantize/optimize_weights.o | $(DYNAMIC_NAME)
+	@ echo CXX/LD special -o $@
+	$(Q)$(CXX) $^ -o $@ $(LINKFLAGS) -l$(LIBRARY_NAME) $(LDFLAGS) -lboost_program_options \
+		-Wl,-rpath,$(ORIGIN)/../../lib
+
 proto: $(PROTO_GEN_CC) $(PROTO_GEN_HEADER)
 
 $(PROTO_BUILD_DIR)/%.pb.cc $(PROTO_BUILD_DIR)/%.pb.h : \
