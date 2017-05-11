@@ -46,15 +46,15 @@ float calc_norm(Blob<float>* top) {
 	return norm;
 }
 
-void extract_b(const int* B_hash, const int BITS, int k, int* B, int b_size) {
+void extract_b(const unsigned int* B_hash, const int BITS, int k, int* B, int b_size) {
 	const int REST_BITS = TOTAL_BITS - BITS;
 
 	for (int i = 0, total_bit_shift = 0; i < b_size; ++i, total_bit_shift += BITS) {
 		int byte_shift = total_bit_shift / TOTAL_BITS;
 		int bit_shift = total_bit_shift % TOTAL_BITS;
 		int shift = REST_BITS - bit_shift;
-		B[i] = (int)((shift < 0 ? B_hash[byte_shift] << -shift | B_hash[byte_shift + 1] >> (TOTAL_BITS + shift) :
-										  B_hash[byte_shift] >> shift) & (k - 1));
+		B[i] = (shift < 0 ? B_hash[byte_shift] << -shift | B_hash[byte_shift + 1] >> (TOTAL_BITS + shift) :
+								  B_hash[byte_shift] >> shift) & (k - 1);
 	}
 }
 
@@ -163,7 +163,7 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 	float* q_b_hash_ = q_layer->blobs()[2]->mutable_cpu_data();
 	int b_unpacked_size = slice_count * out_channels * kernel_size * kernel_size;
 	shared_ptr<Blob<int> > b_unpacked(new Blob<int>(b_unpacked_size, 1, 1, 1));
-	extract_b((const int*)q_b_hash_, BITS, k, b_unpacked->mutable_cpu_data(), b_unpacked_size);
+	extract_b((const unsigned int*)q_b_hash_, BITS, k, b_unpacked->mutable_cpu_data(), b_unpacked_size);
 	shared_ptr<Blob<float> > bs_diffs(new Blob<float>(out_channels, k, 1, 1));
 
 	shared_ptr<Net<float> > net_q_slice = create_one_slice_net(num_images, in_width, in_height, out_channels, pad, stride, kernel_size, k, m);
@@ -273,8 +273,8 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 		q_layer->Forward(vector<Blob<float>* >(1, input_data), vector<Blob<float>* >(1, q_output_data));
 		LOG(INFO) << "Loss for " << slice << " (k): " << calc_loss(src_output_data, q_output_data);
 
-		// HACK: stupid caffe doesn't allow to change layer_param
 		q_slice_layer->blobs() = vector<shared_ptr<Blob<float> > >(q_slice_layer_blobs, q_slice_layer_blobs + 3);
+		// HACK: stupid caffe doesn't allow to change layer_param
 		const_cast<LayerParameter&>(q_slice_layer->layer_param()).mutable_convolution_param()->set_conv_mode(ConvolutionParameter_ConvMode_LOWERED_GEMM);
 		const vector<Blob<float>*>& output_slice_vec_pos = net_q_slice->Forward(&STUB);
 		output_slice->CopyFrom(*output_slice_vec_pos[0], false, true);
@@ -315,7 +315,7 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 				else {
 					b_hash_slice_ct[0] &= ~((k - 1) >> -bit_shift);
 					b_hash_slice_ct[0] |= min_k >> -bit_shift;
-					b_hash_slice_ct[1] &= ~0 >> -bit_shift;
+					b_hash_slice_ct[1] &= ~0u >> -bit_shift;
 					b_hash_slice_ct[1] |= min_k << (TOTAL_BITS + bit_shift);
 					//q_b_hash_slice_[total_shift + 1] = reinterpret_cast<float&>(b_hash_slice_ct[1]);
 				}
@@ -331,7 +331,7 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 				else {
 					b_hash_slice_ct[0] &= ~((k - 1) >> -bit_shift);
 					b_hash_slice_ct[0] |= min_k >> -bit_shift;
-					b_hash_slice_ct[1] &= ~0 >> -bit_shift;
+					b_hash_slice_ct[1] &= ~0u >> -bit_shift;
 					b_hash_slice_ct[1] |= min_k << (TOTAL_BITS + bit_shift);
 				}
 
@@ -346,7 +346,7 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 			// TODO: move it after cycle
 			//q_layer->Forward(vector<Blob<float>* >(1, input_data), vector<Blob<float>* >(1, q_output_data));
 			//net_q->layers()[index + 1]->Forward(net_q->bottom_vecs()[index + 1], net_q->top_vecs()[index + 1]);
-			//LOG(INFO) << "Loss for " << i << " (pos): " << calc_loss(src_output_data, q_output_data);
+			//LOG(INFO) << "Pos " << i << " iteration: " << calc_loss(src_output_data, q_output_data);
 			//LOG(INFO) << "Pos " << i << " iteration";
 		}
 

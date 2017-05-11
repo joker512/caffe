@@ -26,15 +26,15 @@ void InnerProductQLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
         Dtype* top_data = top[0]->mutable_gpu_data();
         Dtype* D = this->blobs_[0]->mutable_gpu_data();
         const Dtype* bias = this->blobs_[1]->gpu_data();
-        int* B_data = (int*)(this->blobs_[2]->cpu_data());
+        unsigned int* B_data = (unsigned int*)(this->blobs_[2]->cpu_data());
         int Bsize = num_output * num_input / M * sizeof(int);
         int* B = new int[Bsize];
         for (int i = 0, total_bit_shift = 0; i < num_output * num_input / M; ++i, total_bit_shift += BITS) {
             int byte_shift = total_bit_shift / TOTAL_BITS;
             int bit_shift = total_bit_shift % TOTAL_BITS;
             int shift = REST_BITS - bit_shift;
-            B[i] = (int)((shift < 0 ? B_data[byte_shift] << -shift | B_data[byte_shift + 1] >> (TOTAL_BITS + shift) :
-                                      B_data[byte_shift] >> shift) & (K - 1));
+            B[i] = (shift < 0 ? B_data[byte_shift] << -shift | B_data[byte_shift + 1] >> (TOTAL_BITS + shift) :
+                                B_data[byte_shift] >> shift) & (K - 1);
         }
         int* Bgpu = 0;
         cudaMalloc((void**)&Bgpu, Bsize);

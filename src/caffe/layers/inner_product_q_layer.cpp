@@ -76,7 +76,7 @@ namespace caffe {
         // free member weights
         const Dtype* bias = this->blobs_[1]->cpu_data();
         // hash with indexes of D columns, each number uses log2(K) bits
-        int* B_hash = (int*)(this->blobs_[2]->cpu_data());
+        unsigned int* B_hash = (unsigned int*)(this->blobs_[2]->cpu_data());
         // D columns indexes unpacked from hash
         unsigned char* B = new unsigned char[num_output * num_input / M];
         for (int i = 0, total_bit_shift = 0; i < num_output * num_input / M; ++i, total_bit_shift += BITS) {
@@ -84,7 +84,7 @@ namespace caffe {
             int bit_shift = total_bit_shift % TOTAL_BITS;
             int shift = REST_BITS - bit_shift;
             B[i] = (unsigned char)((shift < 0 ? B_hash[byte_shift] << -shift | B_hash[byte_shift + 1] >> (TOTAL_BITS + shift) :
-                                      B_hash[byte_shift] >> shift) & (K - 1));
+                                                B_hash[byte_shift] >> shift) & (K - 1));
         }
 
         // result of the multiplication of a slice of the source matrix on a D slice

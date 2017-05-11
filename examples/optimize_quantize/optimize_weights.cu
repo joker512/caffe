@@ -45,8 +45,8 @@ __global__ void kernel_2(int num_images, int out_channels, int out_height, int o
 	const int kernel_w = pos % kernel_size;
 
 	CUDA_KERNEL_LOOP(j_ct, k * out_channels) {
-		int j = j_ct / out_channels;
 		int ct = j_ct % out_channels;
+		int j = j_ct / out_channels;
 		const float* d_slice_j = d_slice_ + j * m;
 		float bs_diff = 0.f;
 

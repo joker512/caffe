@@ -40,14 +40,14 @@ namespace caffe {
 				vector<int> b_shape(1, b_shape_size);
 				B_.Reshape(b_shape);
 			}
-			int* B_hash = (int*)(this->blobs_[2]->cpu_data());
+			unsigned int* B_hash = (unsigned int*)(this->blobs_[2]->cpu_data());
 			int* B = B_.mutable_cpu_data();
 			for (int i = 0, total_bit_shift = 0; i < b_shape_size; ++i, total_bit_shift += BITS) {
 				int byte_shift = total_bit_shift / TOTAL_BITS;
 				int bit_shift = total_bit_shift % TOTAL_BITS;
 				int shift = REST_BITS - bit_shift;
-				B[i] = (int)((shift < 0 ? B_hash[byte_shift] << -shift | B_hash[byte_shift + 1] >> (TOTAL_BITS + shift) :
-										  B_hash[byte_shift] >> shift) & (K - 1));
+				B[i] = (shift < 0 ? B_hash[byte_shift] << -shift | B_hash[byte_shift + 1] >> (TOTAL_BITS + shift) :
+										  B_hash[byte_shift] >> shift) & (K - 1);
 			}
 		}
 	}
