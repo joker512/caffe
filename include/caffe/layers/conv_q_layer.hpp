@@ -24,6 +24,7 @@ protected:
 	//virtual inline bool reverse_dimensions() { return false; }
 
 	Blob<Dtype> cache_;
+	Blob<Dtype> D_;
 	Blob<int> B_;
 
 private:
