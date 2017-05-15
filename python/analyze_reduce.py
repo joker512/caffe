@@ -103,8 +103,6 @@ for layer in net_params.layer:
         stride = param.stride
 
         channels_from[layer.top[0]] = channels_from[layer.bottom[0]]
-        print 'new_height = %d' % ((height - kernel_size + 2 * pad + stride - 1) / stride + 1)
-        print 'new_width = %d' % ((width - kernel_size + 2 * pad + stride - 1) / stride + 1)
         height_from[layer.top[0]] = (height - kernel_size + 2 * pad + stride - 1) / stride + 1
         width_from[layer.top[0]] = (width - kernel_size + 2 * pad + stride - 1) / stride + 1
     elif layer.type == 'Concat':

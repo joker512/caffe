@@ -45,3 +45,8 @@ def codeB(B, K = 32):
         total_bit_shift += BITS
     Bs.dtype = np.float32
     return Bs
+
+
+def codeD(D, dtype = np.int16, precision = 4):
+    Ds = dtype(np.clip(np.round(10**precision * D), np.iinfo(dtype).min, np.iinfo(dtype).max))
+    return Ds.flatten().view(dtype=np.float32).reshape(D.shape[0] / 2, D.shape[1])

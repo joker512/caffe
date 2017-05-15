@@ -19,6 +19,7 @@ namespace caffe {
 		const int BITS = (int)log2(K);
 		const int TOTAL_BITS = 32;
 		const int REST_BITS = TOTAL_BITS - BITS;
+		const int D_DIVIDER = 10000;
 		vector<int> cache_shape_(1, K * this->channels_ / M * conv_in_spatial_dim_);
 		cache_.Reshape(cache_shape_);
 
@@ -30,6 +31,7 @@ namespace caffe {
 			this->blobs_.resize(3);
 			vector<int> d_shape(2);
 			d_shape[0] = K * this->channels_ / M;
+			//d_shape[0] = K * this->channels_ / M / 2;
 			d_shape[1] = M;
 			this->blobs_[0].reset(new Blob<Dtype>(d_shape));
 			vector<int> b_binary_shape(1, BITS * b_shape_size / (8 * sizeof(Dtype)) + (BITS * b_shape_size % (8 * sizeof(Dtype)) ? 1 : 0));
@@ -49,12 +51,23 @@ namespace caffe {
 				B[i] = (shift < 0 ? B_hash[byte_shift] << -shift | B_hash[byte_shift + 1] >> (TOTAL_BITS + shift) :
 										  B_hash[byte_shift] >> shift) & (K - 1);
 			}
+
+			/*if (D_.count() == 0) {
+				vector<int> d_binary_shape(1, this->blobs_[0]->count() * 2);
+				D_.Reshape(d_binary_shape);
+			}
+			short* D_hash = (short*)(this->blobs_[0]->cpu_data());
+			Dtype* D = D_.mutable_cpu_data();
+			for (int i = 0; i < D_.count(); ++i) {
+				D[i] = 1.f * D_hash[i] / D_DIVIDER;
+			}*/
 		}
 	}
 
 	template <typename Dtype>
 	void ConvolutionQLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
 		const Dtype* D = this->blobs_[0]->cpu_data();
+		//const Dtype* D = D_.cpu_data();
 		// hash with indexes of D columns, each number uses log2(K) bits
 		const int* B = B_.cpu_data();
 

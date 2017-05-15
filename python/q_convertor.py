@@ -14,8 +14,10 @@ parser = argparse.ArgumentParser(description='Convert conv and fc layers to quan
 parser.add_argument('-K', help='quantity of clusters', default=32, type=int)
 parser.add_argument('-M', help='size of subvector', default=4, type=int)
 parser.add_argument('-L', '--loadweights', help='load weights from D.npy and B.npy', action='store_true')
-parser.add_argument('-W', '--newweights', help='file to save new weights')
 parser.add_argument('-C', '--newmodel', help='file to save new prototxt')
+parser.add_argument('-W', '--newweights', help='file to save new weights')
+parser.add_argument('-P', '--srcmodel', help='optional config to load model with source weights for layer')
+parser.add_argument('-S', '--srcweights', help='optional file to load source weights for layer')
 parser.add_argument('model', help='model.prototxt')
 parser.add_argument('weights', help='weights.caffemodel')
 parser.add_argument('layer', help='conv or fc layer to convert')
@@ -24,6 +26,8 @@ args = parser.parse_args()
 
 print('Start model converting')
 net = caffe.Net(network_file=args.model, phase=caffe.TEST, weights=args.weights)
+if args.srcweights:
+    src_net = caffe.Net(network_file=args.srcmodel, phase=caffe.TEST, weights=args.srcweights)
 net_params = pb2.NetParameter()
 with open(args.model) as f:
     tf.Merge(f.read(), net_params)
@@ -33,7 +37,7 @@ if args.loadweights:
     D, B = np.load('D.npy'), np.load('B.npy')
     print('Weights have been loaded')
 else:
-    weights = net.params[args.layer][0].data
+    weights = net.params[args.layer][0].data if not src_net else src_net.params[args.layer][0].data
     # TODO: D calculation doesn't need to depend from fc or conv type
     is_fc = False
     for i in xrange(len(net._layer_names)):
@@ -71,14 +75,16 @@ else:
 
     D, B = ew.calcBD(weights, args.K, args.M, is_fc)
     print('D and B have been calced')
+    #D = ew.codeD(D)
     B = ew.codeB(B, args.K)
-    print('B has been coded')
+    print('D and B has been coded')
     np.save('D', D)
     np.save('B', B)
 
 net.params[args.layer][0].reshape(*D.shape)
 net.params[args.layer][0].data[...] = D
-net.params[args.layer].add_blob()
+if len(net.params[args.layer]) == 2:
+    net.params[args.layer].add_blob()
 net.params[args.layer][2].reshape(*B.shape)
 net.params[args.layer][2].data[...] = B
 print('D and B have been saved to layer %s' % args.layer)

@@ -19,7 +19,8 @@ void build_A(int, int, int, int, int, int, int, int, int, int, int,
 void build_bsdiffs(int, int, int, int, int, int, int, int, int, int, int,
 						 int, const float*, const float*, const float*, float*);
 
-void multiply(int, int, int, const float*, const float*, float*);
+void multiply_mmv(int, int, const float*, const float*, const float*, float*);
+void multiply_st(int, int, const float*, float*);
 
 const int TOTAL_BITS = 8 * sizeof(float);
 float STUB = 0.f;
@@ -127,15 +128,11 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 	shared_ptr<Blob<float> > P(new Blob<float>(output_shape));
 	shared_ptr<Blob<float> > A(new Blob<float>(out_size, m, 1, 1));
 	float* A_ = A->mutable_gpu_data();
-	shared_ptr<Blob<float> > A_trans(new Blob<float>(m, out_size, 1, 1));
-	float* A_trans_ = A_trans->mutable_gpu_data();
 	shared_ptr<Blob<float> > A_sq(new Blob<float>(m, m, 1, 1));
 	float** A_sq_;
 	cudaMallocManaged(&A_sq_, sizeof(float*));
 	A_sq_[0] = A_sq->mutable_gpu_data();
 
-	shared_ptr<Blob<float> > A_inv(new Blob<float>(m, out_size, 1, 1));
-	float* A_inv_ = A_inv->mutable_gpu_data();
 	shared_ptr<Blob<float> > A_sq_inv(new Blob<float>(m, m, 1, 1));
 	float** A_sq_inv_;
 	cudaMallocManaged(&A_sq_inv_, sizeof(float*));
@@ -148,9 +145,6 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 	const int BITS = (int)log2(k);
 	const int REST_BITS = TOTAL_BITS - BITS;
 	shared_ptr<Blob<float> > d_slice(new Blob<float>(k, m, 1, 1));
-	float* d_slice_ = d_slice->mutable_cpu_data();
-	//CHECK_EQ((BITS * out_channels) % TOTAL_BITS, 0) << "log2(k) * num_output of "
-	//	<< layer_name << " layer has to be multiple of " << TOTAL_BITS << " (" << out_channels * BITS << ").";
 	int b_slice_size = (out_channels * kernel_size * kernel_size * BITS + TOTAL_BITS - 1) / TOTAL_BITS;
 	int b_slice_rest = out_channels * kernel_size * kernel_size * BITS % TOTAL_BITS;
 	if (b_slice_rest == 0) b_slice_rest = TOTAL_BITS;
@@ -171,16 +165,15 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 	shared_ptr<Layer<float> > q_slice_layer = net_q_slice->layers()[1];
 
 	//float previous_loss = 0.f;
-	int* q_b_hash_slice_ = (int*)q_b_hash_;
+	unsigned int* q_b_hash_slice_ = (unsigned int*)q_b_hash_;
 	int b_slice_cur_rest = 0;
+	LOG(INFO) << "Number of slices: " << slice_count;
+	LOG(INFO) << "Number of clusters: " << k;
 	for (int slice = 0; slice < slice_count; ++slice) {
 		float* q_d_slice_ = q_d_ + slice * k * m;
+		float* d_slice_ = d_slice->mutable_cpu_data();
 		for (int i = 0; i < k * m; ++i)
 			d_slice_[i] = q_d_slice_[i];
-		/*q_b_hash_slice_ = q_b_hash_ + slice * b_slice_size;
-		for (int i = 0; i < b_slice_size; ++i) {
-			b_hash_slice_[i] = q_b_hash_slice_[i];
-		}*/
 		for (int i = 0; i < b_slice_size; ++i) {
 			if (b_slice_cur_rest == 0) {
 				b_hash_slice_[i] = reinterpret_cast<float&>(q_b_hash_slice_[i]);
@@ -217,7 +210,7 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 		caffe_sub(out_size, q_output_, output_slice_, output_wo_slice->mutable_cpu_data());
 		caffe_sub(out_size, src_output_, output_wo_slice->cpu_data(), R->mutable_cpu_data());
 
-		LOG(INFO) << "\n";
+		//LOG(INFO) << "\n";
 		// HACK: stupid caffe doesn't allow to change layer_param
 		const_cast<LayerParameter&>(q_slice_layer->layer_param()).mutable_convolution_param()->set_conv_mode(ConvolutionParameter_ConvMode_SINGLE_K);
 		for (int i = 0; i < k; ++i) {
@@ -234,11 +227,10 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 					  pad, stride, input_slice->gpu_data(), b_unpacked_slice_gpu, A->mutable_gpu_data());
 			//LOG(INFO) << "Before first multiplication";
 
-			/*cublasSgeam(Caffe::cublas_handle(), CUBLAS_OP_T, CUBLAS_OP_N, out_size, m, &ALPHA, A_, m, &STUB, A_, out_size, A_trans_, out_size);
-			multiply(m, out_size, m, A_trans_, A_trans_, A_sq->mutable_gpu_data());
+			multiply_st(out_size, m, A_, A_sq_[0]);
 			CUBLAS_CHECK(cublasSgetrfBatched(Caffe::cublas_handle(), m, A_sq_, m, pivot, info, 1));
 			CUBLAS_CHECK(cublasSgetriBatched(Caffe::cublas_handle(), m, (const float**)A_sq_, m, pivot, A_sq_inv_, m, info, 1));
-			multiply(m, m, out_size, A_sq_inv->gpu_data(), A_, A_inv->mutable_gpu_data());*/
+			multiply_mmv(m, out_size, A_sq_inv->gpu_data(), A_, Q->gpu_data(), d_slice->mutable_gpu_data() + i * m);
 
 			/*caffe_gpu_gemm(CblasTrans, CblasNoTrans, m, m, out_size, 1.f, A_, A_, 0.f, A_sq->mutable_gpu_data());
 			CUBLAS_CHECK(cublasSgetrfBatched(Caffe::cublas_handle(), m, A_sq_, m, pivot, info, 1));
@@ -246,12 +238,12 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 			caffe_gpu_gemm(CblasNoTrans, CblasTrans, m, out_size, m, 1.f, A_sq_inv->gpu_data(), A_, 0.f, A_inv->mutable_gpu_data());
 			caffe_gpu_gemv(CblasNoTrans, m, out_size, 1.f, A_inv_, Q->gpu_data(), 0.f, d_slice->mutable_gpu_data() + i * m);*/
 
-			caffe_cpu_gemm(CblasTrans, CblasNoTrans, m, m, out_size, 1.f, A->cpu_data(), A->cpu_data(), 0.f, A_sq->mutable_cpu_data());
+			/*caffe_cpu_gemm(CblasTrans, CblasNoTrans, m, m, out_size, 1.f, A->cpu_data(), A->cpu_data(), 0.f, A_sq->mutable_cpu_data());
 			cv::Mat A_sq_inv_cv(m, m, CV_32FC1, const_cast<float*>(A_sq->cpu_data()));
 			cv::invert(A_sq_inv_cv, A_sq_inv_cv);
 			float* A_sq_inv_cv_ = (float*)A_sq_inv_cv.ptr();
 			caffe_cpu_gemm(CblasNoTrans, CblasTrans, m, out_size, m, 1.f, A_sq_inv_cv_, A->cpu_data(), 0.f, A_inv->mutable_cpu_data());
-			caffe_cpu_gemv(CblasNoTrans, m, out_size, 1.f, A_inv->cpu_data(), Q->cpu_data(), 0.f, d_slice->mutable_cpu_data() + i * m);
+			caffe_cpu_gemv(CblasNoTrans, m, out_size, 1.f, A_inv->cpu_data(), Q->cpu_data(), 0.f, d_slice->mutable_cpu_data() + i * m);*/
 			//LOG(INFO) << "After all";
 
 			const float* d_slice_i = d_slice->cpu_data() + i * m;
@@ -259,7 +251,6 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 			for (int j = 0; j < m; ++j)
 				q_d_slice_i[j] = d_slice_i[j];
 
-			q_slice_layer->blobs() = vector<shared_ptr<Blob<float> > >(q_slice_layer_blobs, q_slice_layer_blobs + 3);
 			const vector<Blob<float>*>& output_slice_k_fixed_vec = net_q_slice->Forward(&STUB);
 			output_slice_k->CopyFrom(*output_slice_k_fixed_vec[0], false, true);
 			caffe_add(out_size, output_slice_, output_slice_k->cpu_data(), output_slice_);
@@ -270,14 +261,11 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 			//previous_loss = loss;
 			//LOG(INFO) << "K " << i << " iteration";
 		}
-		q_layer->Forward(vector<Blob<float>* >(1, input_data), vector<Blob<float>* >(1, q_output_data));
-		LOG(INFO) << "Loss for " << slice << " (k): " << calc_loss(src_output_data, q_output_data);
+		if (slice_count < 100 || slice % 10 == 0) {
+			caffe_add(out_size, output_wo_slice->cpu_data(), output_slice_, q_output_data->mutable_cpu_data());
+			LOG(INFO) << "Loss for " << slice << " (k): " << calc_loss(src_output_data, q_output_data);
+		}
 
-		q_slice_layer->blobs() = vector<shared_ptr<Blob<float> > >(q_slice_layer_blobs, q_slice_layer_blobs + 3);
-		// HACK: stupid caffe doesn't allow to change layer_param
-		const_cast<LayerParameter&>(q_slice_layer->layer_param()).mutable_convolution_param()->set_conv_mode(ConvolutionParameter_ConvMode_LOWERED_GEMM);
-		const vector<Blob<float>*>& output_slice_vec_pos = net_q_slice->Forward(&STUB);
-		output_slice->CopyFrom(*output_slice_vec_pos[0], false, true);
 		// HACK: stupid caffe doesn't allow to change layer_param
 		const_cast<LayerParameter&>(q_slice_layer->layer_param()).mutable_convolution_param()->set_conv_mode(ConvolutionParameter_ConvMode_SINGLE_POS);
 		for (int i = 0; i < kernel_size * kernel_size; ++i) {
@@ -317,13 +305,11 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 					b_hash_slice_ct[0] |= min_k >> -bit_shift;
 					b_hash_slice_ct[1] &= ~0u >> -bit_shift;
 					b_hash_slice_ct[1] |= min_k << (TOTAL_BITS + bit_shift);
-					//q_b_hash_slice_[total_shift + 1] = reinterpret_cast<float&>(b_hash_slice_ct[1]);
 				}
-				//q_b_hash_slice_[total_shift] = reinterpret_cast<float&>(b_hash_slice_ct[0]);
 
 				total_shift = (b_unpacked_index * BITS + b_slice_cur_rest) / TOTAL_BITS;
 				bit_shift = REST_BITS - (b_unpacked_index * BITS + b_slice_cur_rest) % TOTAL_BITS;
-				b_hash_slice_ct = q_b_hash_slice_ + total_shift;
+				b_hash_slice_ct = (int*)(q_b_hash_slice_ + total_shift);
 				if (bit_shift >= 0) {
 					b_hash_slice_ct[0] &= ~((k - 1) << bit_shift);
 					b_hash_slice_ct[0] |= min_k << bit_shift;
@@ -338,12 +324,10 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 				b_unpacked_slice[b_unpacked_index] = min_k;
 			}
 
-			q_slice_layer->blobs() = vector<shared_ptr<Blob<float> > >(q_slice_layer_blobs, q_slice_layer_blobs + 3);
 			const vector<Blob<float>*>& output_slice_pos_fixed_vec = net_q_slice->Forward(&STUB);
 			output_slice_pos->CopyFrom(*output_slice_pos_fixed_vec[0], false, true);
 			caffe_add(out_size, output_slice_, output_slice_pos->cpu_data(), output_slice_);
 
-			// TODO: move it after cycle
 			//q_layer->Forward(vector<Blob<float>* >(1, input_data), vector<Blob<float>* >(1, q_output_data));
 			//net_q->layers()[index + 1]->Forward(net_q->bottom_vecs()[index + 1], net_q->top_vecs()[index + 1]);
 			//LOG(INFO) << "Pos " << i << " iteration: " << calc_loss(src_output_data, q_output_data);
@@ -357,9 +341,15 @@ void optimize_conv_layer(shared_ptr<ConvolutionQLayer<float> > q_layer, Blob<flo
 			++q_b_hash_slice_;
 		}
 
-		q_layer->Forward(vector<Blob<float>* >(1, input_data), vector<Blob<float>* >(1, q_output_data));
-		LOG(INFO) << "Loss for " << slice << " (pos): " << calc_loss(src_output_data, q_output_data);
+		caffe_add(out_size, output_wo_slice->cpu_data(), output_slice_, q_output_data->mutable_cpu_data());
+		if (slice_count < 100 || slice % 10 == 0) {
+			LOG(INFO) << "Loss for " << slice << " (pos): " << calc_loss(src_output_data, q_output_data);
+			LOG(INFO) << "\n";
+		}
 	}
+	//q_layer->Forward(vector<Blob<float>* >(1, input_data), vector<Blob<float>* >(1, q_output_data));
+	//LOG(INFO) << "Loss after all iterations: " << calc_loss(src_output_data, q_output_data);
+
 	cudaFree(A_sq_);
 	cudaFree(A_sq_inv_);
 	cudaFree(pivot);
@@ -440,7 +430,7 @@ int main(int argc, char** argv) {
 	for (int it = start_it; it < start_it + iterations; ++it) {
 		net_src->Forward();
 
-		LOG(INFO) << "Starting " << it << " optimization iteration";
+		LOG(INFO) << "Starting " << it << " optimization iteration (batch " << skip++ << ")";
 		int prev_index = 0;
 		for (int l_index = 0; l_index < layers_size; ++l_index) {
 			shared_ptr<Layer<float> > layer = net_q->layers()[l_index];
