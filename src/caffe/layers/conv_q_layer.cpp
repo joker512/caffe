@@ -62,18 +62,42 @@ namespace caffe {
 	}
 	
 	// TODO: SPEC for kernel_w = 5,7 pad_w = 0,1
-	template <int kernel_w, int pad_w, typename Dtype> class kernel_row_processor;
-		
-	template <typename Dtype>
-	class kernel_row_processor<1, 0, Dtype>
-	{
+	template <int kernel, int pad, typename Dtype> class kernel_row_processor {
 	public:
-		kernel_row_processor(int stride_w, int output_w, int conv_in_spatial_dim_)
-		: stride_w(stride_w), output_w(output_w), conv_in_spatial_dim_(conv_in_spatial_dim_)
+		kernel_row_processor(int width, int stride_w, int output_w, int conv_in_spatial_dim_)
+		: width(width), stride_w(stride_w), output_w(output_w), conv_in_spatial_dim_(conv_in_spatial_dim_)
 		{}
 
-		inline void process_row(Dtype* d, const Dtype * cpu_row, const int* b_kernel_row)
-		{
+		inline void process_row(Dtype* d, const Dtype * cpu_row, const int* b_kernel_row) {
+			for (int kernel_col = 0; kernel_col < kernel; ++kernel_col) {
+				const Dtype* cache_row_row = cpu_row + b_kernel_row[kernel_col]*conv_in_spatial_dim_;
+
+				int input_col = -pad + kernel_col;
+
+				for (int output_col = 0; output_col < output_w; ++output_col) {
+					if (static_cast<unsigned>(input_col) < static_cast<unsigned>(width)) {
+						d[output_col] += cache_row_row[input_col];
+					}
+					input_col += stride_w;
+				}
+			}
+		}
+
+	private:
+		const int width;
+		const int stride_w;
+		const int output_w;
+		const int conv_in_spatial_dim_;
+	};
+
+	template <typename Dtype>
+	class kernel_row_processor<1, 0, Dtype> {
+	public:
+		kernel_row_processor(int width, int stride_w, int output_w, int conv_in_spatial_dim_)
+		: width(width), stride_w(stride_w), output_w(output_w), conv_in_spatial_dim_(conv_in_spatial_dim_)
+		{}
+
+		inline void process_row(Dtype* d, const Dtype * cpu_row, const int* b_kernel_row) {
 			const Dtype * src0 = cpu_row + b_kernel_row[0] * conv_in_spatial_dim_;
 
 			Dtype *D = d+output_w;
@@ -84,21 +108,20 @@ namespace caffe {
 		}
 
 	private:
+		const int width;
 		const int stride_w;
 		const int output_w;
 		const int conv_in_spatial_dim_;
 	};
 
 	template <typename Dtype>
-	class kernel_row_processor<3, 0, Dtype>
-	{
+	class kernel_row_processor<3, 0, Dtype> {
 	public:
-		kernel_row_processor(int stride_w, int output_w, int conv_in_spatial_dim_)
-		: stride_w(stride_w), output_w(output_w), conv_in_spatial_dim_(conv_in_spatial_dim_)
+		kernel_row_processor(int width, int stride_w, int output_w, int conv_in_spatial_dim_)
+		: width(width), stride_w(stride_w), output_w(output_w), conv_in_spatial_dim_(conv_in_spatial_dim_)
 		{}
 
-		inline void process_row(Dtype* d, const Dtype * cpu_row, const int* b_kernel_row)
-		{
+		inline void process_row(Dtype* d, const Dtype * cpu_row, const int* b_kernel_row) {
 			const Dtype * src0 = cpu_row + b_kernel_row[0] * conv_in_spatial_dim_;
 			const Dtype * src1 = cpu_row + b_kernel_row[1] * conv_in_spatial_dim_;
 			const Dtype * src2 = cpu_row + b_kernel_row[2] * conv_in_spatial_dim_;
@@ -113,6 +136,7 @@ namespace caffe {
 		}
 
 	private:
+		const int width;
 		const int stride_w;
 		const int output_w;
 		const int conv_in_spatial_dim_;
@@ -121,8 +145,8 @@ namespace caffe {
 	template <typename Dtype>
 	class kernel_row_processor<3, 1, Dtype> {
 	public:
-		kernel_row_processor(int stride_w, int output_w, int conv_in_spatial_dim_)
-		: stride_w(stride_w), output_w(output_w), conv_in_spatial_dim_(conv_in_spatial_dim_)
+		kernel_row_processor(int width, int stride_w, int output_w, int conv_in_spatial_dim_)
+		: width(width), stride_w(stride_w), output_w(output_w), conv_in_spatial_dim_(conv_in_spatial_dim_)
 		{}
 
 		inline void process_row(Dtype* d, const Dtype * cpu_row, const int* b_kernel_row) {
@@ -132,16 +156,20 @@ namespace caffe {
 
 			*d += src1[0]+src2[1];
 			Dtype *D = d+output_w-1;
+			src0+=stride_w;
+			src1+=stride_w;
+			src2+=stride_w;
 			while (++d < D) {
-				*d += src0[0] + src1[1] + src2[2];
+				*d += src0[-1] + src1[0] + src2[1];
 				src0+=stride_w;
 				src1+=stride_w;
 				src2+=stride_w;
 			}
-			*d += src0[0]+src1[1];
+			*d += src0[-1]+src1[0];
 		}
 
 	private:
+		const int width;
 		const int stride_w;
 		const int output_w;
 		const int conv_in_spatial_dim_;
@@ -154,14 +182,15 @@ namespace caffe {
 		{}
 
 		inline void process_image(Dtype* top_data_channel, const Dtype * cpu_data, const int* b_out_channel) {
-			kernel_row_processor<kernel, pad, Dtype>  krp(stride, output_w, conv_in_spatial_dim_);
-				for (int output_row = 0; output_row < output_h; ++output_row) {
-					Dtype* top_data_row = &top_data_channel[output_row * output_w];
+			kernel_row_processor<kernel, pad, Dtype>  krp(width, stride, output_w, conv_in_spatial_dim_);
+			
+			for (int output_row = 0; output_row < output_h; ++output_row) {
+				Dtype* top_data_row = &top_data_channel[output_row * output_w];
 
-					for (int kernel_row = 0; kernel_row < kernel; ++kernel_row) {
-						int input_row = -pad + kernel_row + output_row*stride;
-						if (static_cast<unsigned>(input_row) < static_cast<unsigned>(height)) {
-							krp.process_row(top_data_row, cpu_data + input_row*width, b_out_channel + kernel_row*kernel);
+				for (int kernel_row = 0; kernel_row < kernel; ++kernel_row) {
+					int input_row = -pad + kernel_row + output_row*stride;
+					if (static_cast<unsigned>(input_row) < static_cast<unsigned>(height)) {
+						krp.process_row(top_data_row, cpu_data + input_row*width, b_out_channel + kernel_row*kernel);
 					}
 				}
 			}
@@ -183,11 +212,11 @@ namespace caffe {
 		{}
 
 		inline void process_image(Dtype* top_data_channel, const Dtype * cpu_data, const int* b_out_channel) {
-			kernel_row_processor<3, 1, Dtype>  krp(stride, output_w, conv_in_spatial_dim_);
+			kernel_row_processor<3, 1, Dtype>  krp(width, stride, output_w, conv_in_spatial_dim_);
 
 			Dtype* top_data_row = top_data_channel;
 			krp.process_row(top_data_row, cpu_data, b_out_channel + 3);
-			krp.process_row(top_data_row, cpu_data, b_out_channel + 6);
+			krp.process_row(top_data_row, cpu_data+width, b_out_channel + 6);
 			top_data_row += output_w;
 
 			int input_row = stride;
