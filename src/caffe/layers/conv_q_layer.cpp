@@ -2,7 +2,7 @@
 #include <time.h>
 
 #include "caffe/layers/conv_q_layer.hpp"
-
+#include "vectorial/simd4f.h"
 
 namespace caffe {
 
@@ -93,8 +93,8 @@ namespace caffe {
 	template <typename Dtype>
 	class kernel_row_processor<1, 0, Dtype> {
 	public:
-		kernel_row_processor(int width, int stride_w, int output_w, int conv_in_spatial_dim_)
-		: width(width), stride_w(stride_w), output_w(output_w), conv_in_spatial_dim_(conv_in_spatial_dim_)
+		kernel_row_processor(int, int stride_w, int output_w, int conv_in_spatial_dim_)
+		: stride_w(stride_w), output_w(output_w), conv_in_spatial_dim_(conv_in_spatial_dim_)
 		{}
 
 		inline void process_row(Dtype* d, const Dtype * cpu_row, const int* b_kernel_row) {
@@ -108,7 +108,6 @@ namespace caffe {
 		}
 
 	private:
-		const int width;
 		const int stride_w;
 		const int output_w;
 		const int conv_in_spatial_dim_;
@@ -150,22 +149,19 @@ namespace caffe {
 		{}
 
 		inline void process_row(Dtype* d, const Dtype * cpu_row, const int* b_kernel_row) {
+
 			const Dtype * src0 = cpu_row + b_kernel_row[0] * conv_in_spatial_dim_;
 			const Dtype * src1 = cpu_row + b_kernel_row[1] * conv_in_spatial_dim_;
 			const Dtype * src2 = cpu_row + b_kernel_row[2] * conv_in_spatial_dim_;
-
+			
 			*d += src1[0]+src2[1];
 			Dtype *D = d+output_w-1;
-			src0+=stride_w;
-			src1+=stride_w;
-			src2+=stride_w;
+			int icol = stride_w;
 			while (++d < D) {
-				*d += src0[-1] + src1[0] + src2[1];
-				src0+=stride_w;
-				src1+=stride_w;
-				src2+=stride_w;
+				*d += src0[icol-1] + src1[icol] + src2[icol+1];
+				icol+=stride_w;
 			}
-			*d += src0[-1]+src1[0];
+			*d += src0[icol-1]+src1[icol];
 		}
 
 	private:
@@ -192,6 +188,52 @@ namespace caffe {
 					if (static_cast<unsigned>(input_row) < static_cast<unsigned>(height)) {
 						krp.process_row(top_data_row, cpu_data + input_row*width, b_out_channel + kernel_row*kernel);
 					}
+				}
+			}
+		}
+
+	private:
+		const int height;
+		const int width;
+		const int stride;
+		const int output_h;
+		const int output_w;
+		const int conv_in_spatial_dim_;
+	};
+
+	template <typename Dtype> class kernel_cell_processor<1,0,Dtype> {
+	public:
+		kernel_cell_processor(int height,int width,int stride,int output_h,int output_w, int conv_in_spatial_dim_)
+		: height(height),width(width),stride(stride),output_h(output_h),output_w(output_w),conv_in_spatial_dim_(conv_in_spatial_dim_)
+		{}
+
+		inline void process_image(Dtype* top_data_channel, const Dtype * cpu_data, const int* b_out_channel) {
+			kernel_row_processor<1,0,Dtype>  krp(width, stride, output_w, conv_in_spatial_dim_);
+
+			const Dtype *cpu_data_b = cpu_data + b_out_channel[0] * conv_in_spatial_dim_;
+
+			int N = output_h*output_w;
+			if (stride==1 && (N&3)==0 && (uintptr_t(top_data_channel)&0xF)==0 && (uintptr_t(cpu_data_b)&0xF)==0) {
+				N/=4;
+				simd4f *d = (simd4f*)top_data_channel;
+				simd4f *s = (simd4f*)cpu_data_b;
+				for (int i = 0; i<N; ++i)
+				{
+					d[i] = simd4f_add(d[i], s[i]);
+				}
+			} else {
+				const int off = stride*width;
+				for (int output_row = 0; output_row < output_h; ++output_row) {
+
+					Dtype* d = top_data_channel + output_row*output_w;
+					const Dtype * src0 = cpu_data_b;
+
+					Dtype *D = d+output_w;
+					while (d < D) {
+						*(d++) += src0[0];
+						src0+=stride;
+					}
+					cpu_data_b+=off;
 				}
 			}
 		}
@@ -260,10 +302,10 @@ namespace caffe {
 		const int dilation_w = this->dilation_.cpu_data()[1];
 		const int output_h = (height + 2 * pad_h - (dilation_h * (kernel_h - 1) + 1)) / stride_h + 1;
 		const int output_w = (width + 2 * pad_w -(dilation_w * (kernel_w - 1) + 1)) / stride_w + 1;
-		
+
 		// check if we can use optimazed kernel processor
 		//const bool can_use_fast_path = (kernel_h==kernel_w) && (stride_h==stride_w);
-        
+
 		// TODO: support for multiple bottoms and tops
 		for (int i = 0; i < bottom.size(); ++i) {
 			const Dtype* bottom_data = bottom[i]->cpu_data();
