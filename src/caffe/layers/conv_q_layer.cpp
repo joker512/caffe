@@ -20,7 +20,7 @@ namespace caffe {
 		const int TOTAL_BITS = 32;
 		const int REST_BITS = TOTAL_BITS - BITS;
 		const int D_DIVIDER = 10000;
-		vector<int> cache_shape_(1, K * this->channels_ / M * conv_in_spatial_dim_);
+		vector<int> cache_shape_(1, K * conv_in_spatial_dim_);
 		cache_.Reshape(cache_shape_);
 
 		const int kernel_h = this->kernel_shape_.cpu_data()[0];

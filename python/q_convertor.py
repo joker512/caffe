@@ -11,16 +11,14 @@ import argparse
 
 
 parser = argparse.ArgumentParser(description='Convert conv and fc layers to quantized format')
-parser.add_argument('-K', help='quantity of clusters', default=32, type=int)
-parser.add_argument('-M', help='size of subvector', default=4, type=int)
-parser.add_argument('-L', '--loadweights', help='load weights from D.npy and B.npy', action='store_true')
 parser.add_argument('-C', '--newmodel', help='file to save new prototxt')
 parser.add_argument('-W', '--newweights', help='file to save new weights')
 parser.add_argument('-P', '--srcmodel', help='optional config to load model with source weights for layer')
 parser.add_argument('-S', '--srcweights', help='optional file to load source weights for layer')
+parser.add_argument('-F', '--force', help='recompress all layers, including already quantized', action='store_true')
 parser.add_argument('model', help='model.prototxt')
 parser.add_argument('weights', help='weights.caffemodel')
-parser.add_argument('layer', help='conv or fc layer to convert')
+parser.add_argument('config', help ='quantize configuration file in format: "layer k m"')
 
 args = parser.parse_args()
 
@@ -33,61 +31,71 @@ with open(args.model) as f:
     tf.Merge(f.read(), net_params)
 print('Model has been loaded')
 
-if args.loadweights:
-    D, B = np.load('D.npy'), np.load('B.npy')
-    print('Weights have been loaded')
-else:
-    weights = net.params[args.layer][0].data if not src_net else src_net.params[args.layer][0].data
+q_layer_k_m = []
+if args.config:
+    with open(args.config) as f:
+        for line in f.readlines():
+            if not line.startswith('#'):
+                name, k, m = line.split()
+                k, m = int(k), int(m)
+                q_layer_k_m.append((name, k, m))
+
+for layer_name, K, M in q_layer_k_m:
+    weights = net.params[layer_name][0].data if not src_net else src_net.params[layer_name][0].data
     # TODO: D calculation doesn't need to depend from fc or conv type
     is_fc = False
-    for i in xrange(len(net._layer_names)):
-        if net._layer_names[i] == args.layer:
-            index, layer = next((j, e) for j, e in enumerate(net_params.layer) if e.name == args.layer)
-            if not layer.top[0].endswith("_"):
-                layer.top[0] += "_"
-                net_params.layer[index + 1].bottom[0] += "_"
-            if hasattr(layer, 'blobs_lr'):
-                layer.ClearField('blobs_lr')
-            if hasattr(layer, 'weight_decay'):
-                layer.ClearField('weight_decay')
-            if net.layers[i].type == 'Convolution':
-                in_channels = weights.shape[1]
-                weights = weights.transpose((0, 2, 3, 1)).reshape((-1, in_channels))
+    i = next(pos for pos, e in enumerate(net._layer_names) if e == layer_name)
+    index, layer = next((j, e) for j, e in enumerate(net_params.layer) if e.name == layer_name)
+    if net.layers[i].type == 'Convolution':
+        param = layer.convolution_param
+        if param.engine == pb2.ConvolutionParameter.Engine.Value('QUANT') and param.k == K and param.m == M and not args.force:
+            print('Skipping layer %s which is already quantized.' % layer_name)
+            continue
+        else:
+            print('Start processing layer %s (%d, %d)' % (layer_name, K, M))
+        param.engine = pb2.ConvolutionParameter.Engine.Value('QUANT')
+        param.ClearField('bias_filler')
+        param.ClearField('weight_filler')
 
-                param = layer.convolution_param
-                param.engine = pb2.ConvolutionParameter.Engine.Value('QUANT')
-                param.ClearField('bias_filler')
-                param.ClearField('weight_filler')
-            elif net.layers[i].type == 'InnerProduct':
-                is_fc = True
-                layer.type = pb2.V1LayerParameter.LayerType.Value('INNER_PRODUCT_Q')
-                # TODO: type change is impossible
-                # need to make engine like for conv layer or save-load-save .caffemodel
-                # net.layers[i].type = 'InnerProductQ'
-                param = layer.inner_product_q_param
-                param.num_output = layer.inner_product_param.num_output
-                layer.ClearField('inner_product_param')
-            else:
-                raise ValueError('%s layer %s type is unknown' % (args.layer, net.layers[i].type))
-            param.k = args.K
-            param.m = args.M
-    print('Weights have been extracted')
+        in_channels = weights.shape[1]
+        weights = weights.transpose((0, 2, 3, 1)).reshape((-1, in_channels))
+    elif net.layers[i].type == 'InnerProduct':
+        is_fc = True
+        layer.type = pb2.V1LayerParameter.LayerType.Value('INNER_PRODUCT_Q')
+        # TODO: type change is impossible
+        # need to make engine like for conv layer or save-load-save .caffemodel
+        # net.layers[i].type = 'InnerProductQ'
+        param = layer.inner_product_q_param
+        param.num_output = layer.inner_product_param.num_output
+        layer.ClearField('inner_product_param')
+    else:
+        raise ValueError('%s layer %s type is unknown' % (layer_name, net.layers[i].type))
 
-    D, B = ew.calcBD(weights, args.K, args.M, is_fc)
-    print('D and B have been calced')
+    if not layer.top[0].endswith("_"):
+        layer.top[0] += "_"
+        net_params.layer[index + 1].bottom[0] += "_"
+    if hasattr(layer, 'blobs_lr'):
+        layer.ClearField('blobs_lr')
+    if hasattr(layer, 'weight_decay'):
+        layer.ClearField('weight_decay')
+
+    param.k = K
+    param.m = M
+    print('\tWeights have been extracted')
+
+    D, B = ew.calcBD(weights, K, M, is_fc)
+    print('\tD and B have been calced')
     #D = ew.codeD(D)
-    B = ew.codeB(B, args.K)
-    print('D and B has been coded')
-    np.save('D', D)
-    np.save('B', B)
+    B = ew.codeB(B, K)
+    print('\tD and B has been coded')
 
-net.params[args.layer][0].reshape(*D.shape)
-net.params[args.layer][0].data[...] = D
-if len(net.params[args.layer]) == 2:
-    net.params[args.layer].add_blob()
-net.params[args.layer][2].reshape(*B.shape)
-net.params[args.layer][2].data[...] = B
-print('D and B have been saved to layer %s' % args.layer)
+    net.params[layer_name][0].reshape(*D.shape)
+    net.params[layer_name][0].data[...] = D
+    if len(net.params[layer_name]) == 2:
+        net.params[layer_name].add_blob()
+    net.params[layer_name][2].reshape(*B.shape)
+    net.params[layer_name][2].data[...] = B
+    print('\tD and B have been saved to layer %s' % layer_name)
 
 new_weights = args.newweights if args.newweights else args.weights
 new_model = args.newmodel if args.newmodel else args.model

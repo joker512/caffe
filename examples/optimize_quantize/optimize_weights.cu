@@ -3,6 +3,38 @@
 
 using namespace caffe;
 
+__global__ void gaussjordan(float* A, float* I, int n) {
+	int x = threadIdx.x;
+
+	for (int y = 0; y < n; ++y)
+		I[x * n + y] = x==y ? 1.f : 0.f;
+	__syncthreads();
+
+	for (int i = 0; i < n; ++i) {
+		if (x == i) {
+			float a = A[i*n + i];
+			for (int y = 0; y < n; ++y)
+				I[i*n + y] /= a;
+			for (int y = n - 1; y >= i; --y)
+				A[i*n + y] /= a;
+		}
+		__syncthreads();
+
+		if (x != i) {
+			float a = A[x*n + i];
+			for (int y = 0; y < n; ++y)
+				I[x*n + y] -= I[i*n + y] * a;
+			for (int y = i + 1; y < n; ++y)
+				A[x*n + y] -= A[i*n + y] * a;
+		}
+		__syncthreads();
+	}
+}
+
+void inverse(int n, float* A, float *I) {
+	gaussjordan<<<1, n>>>(A, I, n);
+}
+
 __global__ void kernel_3_mmv(int m, int k, const float* A, const float *B, const float* v, float* C) {
 	const int x = blockIdx.x;
 	
@@ -36,41 +68,41 @@ __global__ void kernel_3_mmv(int m, int k, const float* A, const float *B, const
 __global__ void kernel_3st(int m, int k, const float* A, float* C) {
 	const int x = blockIdx.x;
 	const int y = blockIdx.y;
-	if (x<=y){
-	const int SLICE_SIZE = (k + blockDim.x - 1) / blockDim.x;
-	extern __shared__ float partial_sum[];
-	
-	float sum=0.0;
-	const int start = SLICE_SIZE * threadIdx.x;
-	const int end = min(start + SLICE_SIZE, k);
-	const float* A_x = A + x;
-	const float* B_y = A + y;
-	for (int i = start; i < end; ++i) {
-		sum+=A_x[i*m]*B_y[i*m];
-	}
-	partial_sum[threadIdx.x] = sum;
-	__syncthreads();
-	if (threadIdx.x == 0) {
-		sum = 0.0f;
-		//float* C_xy = C + x * m + y;
-		for (int i = 0; i < blockDim.x; ++i) {
-			sum += partial_sum[i];
+	if (x <= y){
+		const int SLICE_SIZE = (k + blockDim.x - 1) / blockDim.x;
+		extern __shared__ float partial_sum[];
+		
+		float sum=0.0;
+		const int start = SLICE_SIZE * threadIdx.x;
+		const int end = min(start + SLICE_SIZE, k);
+		const float* A_x = A + x;
+		const float* B_y = A + y;
+		for (int i = start; i < end; ++i) {
+			sum+=A_x[i*m]*B_y[i*m];
 		}
-		C[x * m + y] = sum;
-		C[y * m + x] = sum;
-	}
+		partial_sum[threadIdx.x] = sum;
+		__syncthreads();
+		if (threadIdx.x == 0) {
+			sum = 0.0f;
+			//float* C_xy = C + x * m + y;
+			for (int i = 0; i < blockDim.x; ++i) {
+				sum += partial_sum[i];
+			}
+			C[x * m + y] = sum;
+			C[y * m + x] = sum;
+		}
 	}
 }
 
 void multiply_mmv(int m, int k, const float* A, const float *B, const float* v, float* C) {
 	dim3 grid(m);
 	kernel_3_mmv<<<grid, CAFFE_CUDA_NUM_THREADS, CAFFE_CUDA_NUM_THREADS*sizeof(float)>>>(m, k, A, B, v, C);
-	//cudaDeviceSynchronize();
 }
+
 void multiply_st(int k, int m, const float* A, float* C) {
 	dim3 grid(m, m);
 	kernel_3st<<<grid, 16/*CAFFE_CUDA_NUM_THREADS*/, sizeof(float) * 16/*CAFFE_CUDA_NUM_THREADS*/>>>(m, k, A, C);
-	//cudaDeviceSynchronize();
+	cudaDeviceSynchronize();
 }
 
 __global__ void kernel_2(int num_images, int out_channels, int out_height, int out_width, int k,
@@ -190,5 +222,4 @@ void build_A(int num_images, int out_channels, int out_height, int out_width,
 	kernel<<<CAFFE_GET_BLOCKS(num_images * out_channels), CAFFE_CUDA_NUM_THREADS>>>(num_images, out_channels, out_height,
 		out_width, k, m, kernel_size, in_height, in_width, pad, stride, input_slice_,
 		b_unpacked_slice,  A_);
-		cudaDeviceSynchronize();
 }
