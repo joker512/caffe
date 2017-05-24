@@ -14,6 +14,7 @@ parser = argparse.ArgumentParser(description='Reduce level calculator')
 parser.add_argument('-C', '--channels', type=int, help='number of channels of source image')
 parser.add_argument('-W', '--width', type=int, help='width of source image')
 parser.add_argument('-H', '--height', type=int, help='height of source image')
+parser.add_argument('-A', '--all', help='calculate for all layers, including not quantized', action='store_true')
 parser.add_argument('model', help='model.prototxt')
 parser.add_argument('config', help ='quantize configuration file in format: "layer k m"', nargs='?')
 args = parser.parse_args()
@@ -56,6 +57,7 @@ for layer in net_params.layer:
         out_height = (in_height - kernel_size + 2 * pad) / stride + 1
         out_width = (in_width - kernel_size + 2 * pad) / stride + 1
 
+        layer_operations_src = in_channels * out_channels * kernel_size * kernel_size * out_width * out_height
         if layer.name in q_layer_k_m:
             k, m = q_layer_k_m[layer.name]
             layer_operations_q_d = in_width * in_height * in_channels * k
@@ -63,8 +65,10 @@ for layer in net_params.layer:
             layer_operations_q = layer_operations_q_d + layer_operations_q_b
             convolutions_q[layer.name] = (layer_operations_q_d, layer_operations_q_b, layer_operations_q)
             total_operations_q += layer_operations_q
+        elif args.all:
+            total_operations_q += layer_operations_src
 
-            layer_operations_src = in_channels * out_channels * kernel_size * kernel_size * out_width * out_height
+        if args.all or layer.name in q_layer_k_m:
             convolutions_src.append((layer.name, in_channels, out_channels, kernel_size, in_height, in_width, out_height, out_width, layer_operations_src))
             total_operations_src += layer_operations_src
 
