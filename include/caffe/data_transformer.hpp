@@ -75,6 +75,9 @@ class DataTransformer {
    *    set_cpu_data() is used. See image_data_layer.cpp for an example.
    */
   void Transform(const cv::Mat& cv_img, Blob<Dtype>* transformed_blob);
+  void TransformImgAndSeg(const std::vector<cv::Mat>& cv_img_seg,
+    Blob<Dtype>* transformed_data_blob, Blob<Dtype>* transformed_label_blob,
+    const int ignore_label);
 #endif  // USE_OPENCV
 
   /**
@@ -147,6 +150,7 @@ class DataTransformer {
   Phase phase_;
   Blob<Dtype> data_mean_;
   vector<Dtype> mean_values_;
+  vector<Dtype> scale_factors_;
 };
 
 }  // namespace caffe

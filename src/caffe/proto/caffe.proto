@@ -338,7 +338,7 @@ message BlockGroupLassoSpec {
 // NOTE
 // Update the next available ID when you add a new LayerParameter field.
 //
-// LayerParameter next available layer-specific ID: 147 (last added: recurrent_param)
+// LayerParameter next available layer-specific ID: 151 (last added: seg_accuracy)
 message LayerParameter {
   optional string name = 1; // the layer name
   optional string type = 2; // the layer type
@@ -439,6 +439,7 @@ message LayerParameter {
   optional ReLUParameter relu_param = 123;
   optional ReshapeParameter reshape_param = 133;
   optional ScaleParameter scale_param = 142;
+  optional SegAccuracyParameter seg_accuracy_param = 151;
   optional SigmoidParameter sigmoid_param = 124;
   optional SoftmaxParameter softmax_param = 125;
   optional SPPParameter spp_param = 132;
@@ -495,6 +496,13 @@ message TransformationParameter {
   optional uint32 min_side = 22 [default = 0];
 
   optional float apply_probability = 18 [default = 0.5];
+
+  //For seg trainsformation source: deeplab
+  repeated float scale_factors = 25;
+  // the width for cropped region
+  optional uint32 crop_width = 26 [default = 0];
+  // the height for cropped region
+  optional uint32 crop_height = 27 [default = 0];
 }
 
 // Message that stores parameters shared by loss layers
@@ -905,6 +913,15 @@ message ImageDataParameter {
   optional bool mirror = 6 [default = false];
   optional string root_folder = 12 [default = ""];
   optional uint32 labels_count = 13 [default = 1];
+
+    // This is the value set for pixels or images where we don't know the label
+  optional int32 ignore_label = 16 [default = 255];
+  enum LabelType {
+    NONE = 0;
+    IMAGE = 1;
+    PIXEL = 2;
+  }
+  optional LabelType label_type = 17 [default = IMAGE];
 }
 
 message InfogainLossParameter {
@@ -1220,6 +1237,18 @@ message ScaleParameter {
   // may be more efficient).  Initialized with bias_filler (defaults to 0).
   optional bool bias_term = 4 [default = false];
   optional FillerParameter bias_filler = 5;
+}
+
+message SegAccuracyParameter {
+  enum AccuracyMetric {
+    PixelAccuracy = 0;
+    ClassAccuracy = 1;
+    PixelIOU = 2;
+  }
+  optional AccuracyMetric metric = 1 [default = PixelAccuracy];
+  // will ignore pixels with this value when computing accuracy
+  repeated int32 ignore_label = 2;
+  optional bool reset = 3 [default = true];
 }
 
 message SigmoidParameter {
