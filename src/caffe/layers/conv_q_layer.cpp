@@ -18,7 +18,7 @@ namespace caffe {
 		const int TOTAL_BITS = 32;
 		const int REST_BITS = TOTAL_BITS - BITS;
 		const int D_DIVIDER = 10000;
-		vector<int> cache_shape_(1, K * this->channels_ / M * conv_in_spatial_dim_);
+		vector<int> cache_shape_(1, K * conv_in_spatial_dim_);
 		cache_.Reshape(cache_shape_);
 
 		const int kernel_h = this->kernel_shape_.cpu_data()[0];
@@ -153,13 +153,82 @@ namespace caffe {
 			const Dtype * src0 = cpu_row + b_kernel_row[0] * conv_in_spatial_dim_;
 			const Dtype * src1 = cpu_row + b_kernel_row[1] * conv_in_spatial_dim_;
 			const Dtype * src2 = cpu_row + b_kernel_row[2] * conv_in_spatial_dim_;
-			
+
 			*d += src1[0]+src2[1];
 			Dtype *D = d+output_w-1;
 			int icol = stride_w;
 			while (++d < D) {
 				*d += src0[icol-1] + src1[icol] + src2[icol+1];
 				icol+=stride_w;
+			}
+			*d += src0[icol-1]+src1[icol];
+		}
+
+	private:
+		const int width;
+		const int stride_w;
+		const int output_w;
+		const int conv_in_spatial_dim_;
+	};
+	template <>
+	class kernel_row_processor<3, 1, float> {
+	public:
+		typedef float Dtype;
+		kernel_row_processor(int width, int stride_w, int output_w, int conv_in_spatial_dim_)
+		: width(width), stride_w(stride_w), output_w(output_w), conv_in_spatial_dim_(conv_in_spatial_dim_)
+		{}
+
+		inline void process_row(Dtype* d, const Dtype * cpu_row, const int* b_kernel_row) {
+
+			const Dtype * src0 = cpu_row + b_kernel_row[0] * conv_in_spatial_dim_;
+			const Dtype * src1 = cpu_row + b_kernel_row[1] * conv_in_spatial_dim_;
+			const Dtype * src2 = cpu_row + b_kernel_row[2] * conv_in_spatial_dim_;
+
+			*d += src1[0]+src2[1];
+			Dtype *D = d+output_w-1;
+			++d;
+			int icol = 1;
+			while (d < D-3) {
+				simd4f a = simd4f_uload4(d);
+				a = simd4f_add(a, simd4f_uload4(&src0[icol-1]));
+				a = simd4f_add(a, simd4f_uload4(&src1[icol  ]));
+				a = simd4f_add(a, simd4f_uload4(&src2[icol+1]));
+				simd4f_ustore4(a, d);
+
+				d+=4;
+				icol+=4;
+			}
+			while (d < D) {
+				*d += src0[icol-1] + src1[icol] + src2[icol+1];
+				++icol;
+				++d;
+			}
+			*d += src0[icol-1]+src1[icol];
+		}
+		inline void process_row(Dtype* d, const Dtype * src0, const Dtype * src1, const Dtype * src2) {
+
+			//const Dtype * src0 = cpu_row + b_kernel_row[0] * conv_in_spatial_dim_;
+			//const Dtype * src1 = cpu_row + b_kernel_row[1] * conv_in_spatial_dim_;
+			//const Dtype * src2 = cpu_row + b_kernel_row[2] * conv_in_spatial_dim_;
+
+			*d += src1[0]+src2[1];
+			Dtype *D = d+output_w-1;
+			++d;
+			int icol = 1;
+			while (d < D-3) {
+				simd4f a = simd4f_uload4(d);
+				a = simd4f_add(a, simd4f_uload4(&src0[icol-1]));
+				a = simd4f_add(a, simd4f_uload4(&src1[icol  ]));
+				a = simd4f_add(a, simd4f_uload4(&src2[icol+1]));
+				simd4f_ustore4(a, d);
+
+				d+=4;
+				icol+=4;
+			}
+			while (d < D) {
+				*d += src0[icol-1] + src1[icol] + src2[icol+1];
+				++icol;
+				++d;
 			}
 			*d += src0[icol-1]+src1[icol];
 		}
@@ -201,8 +270,9 @@ namespace caffe {
 		const int conv_in_spatial_dim_;
 	};
 
-	template <typename Dtype> class kernel_cell_processor<1,0,Dtype> {
+	template <> class kernel_cell_processor<1,0,float> {
 	public:
+		typedef float Dtype;
 		kernel_cell_processor(int height,int width,int stride,int output_h,int output_w, int conv_in_spatial_dim_)
 		: height(height),width(width),stride(stride),output_h(output_h),output_w(output_w),conv_in_spatial_dim_(conv_in_spatial_dim_)
 		{}
@@ -266,6 +336,7 @@ namespace caffe {
 				krp.process_row(top_data_row, cpu_data + (input_row-1)*width, b_out_channel + 0);
 				krp.process_row(top_data_row, cpu_data + (input_row)*width, b_out_channel + 3);
 				krp.process_row(top_data_row, cpu_data + (input_row+1)*width, b_out_channel + 6);
+
 				input_row+=stride;
 				top_data_row += output_w;
 			}
@@ -283,6 +354,98 @@ namespace caffe {
 		const int conv_in_spatial_dim_;
 	};
 
+	// for stride 1
+	template <> class kernel_cell_processor<3,1,float> {
+	public:
+		typedef float Dtype;
+
+		kernel_cell_processor(int height,int width,int stride,int output_h,int output_w, int conv_in_spatial_dim_)
+		: height(height),width(width),stride(stride),output_h(output_h),output_w(output_w),conv_in_spatial_dim_(conv_in_spatial_dim_)
+		{}
+
+		inline void process_image(Dtype* top_data_channel, const Dtype * cpu_data, const int* b_out_channel) {
+			const Dtype *src00 = cpu_data+b_out_channel[0]*conv_in_spatial_dim_-width;
+			const Dtype *src01 = cpu_data+b_out_channel[1]*conv_in_spatial_dim_-width;
+			const Dtype *src02 = cpu_data+b_out_channel[2]*conv_in_spatial_dim_-width;
+
+			const Dtype *src10 = cpu_data+b_out_channel[3]*conv_in_spatial_dim_;
+			const Dtype *src11 = cpu_data+b_out_channel[4]*conv_in_spatial_dim_;
+			const Dtype *src12 = cpu_data+b_out_channel[5]*conv_in_spatial_dim_;
+
+			const Dtype *src20 = cpu_data+b_out_channel[6]*conv_in_spatial_dim_+width;
+			const Dtype *src21 = cpu_data+b_out_channel[7]*conv_in_spatial_dim_+width;
+			const Dtype *src22 = cpu_data+b_out_channel[8]*conv_in_spatial_dim_+width;
+
+			kernel_row_processor<3, 1, Dtype>  krp(width, stride, output_w, conv_in_spatial_dim_);
+
+			Dtype* top_data_row = top_data_channel;
+			krp.process_row(top_data_row, src10, src11, src12);
+			krp.process_row(top_data_row, src20, src21, src22);
+
+			top_data_row += output_w;
+
+			int input_row = stride;
+			for (int output_row = 1; output_row < output_h-1; ++output_row) {
+
+				Dtype *d = top_data_row;
+				Dtype *D = d+output_w-1;
+
+				int icol = input_row*width;
+				*d += src01[icol]+src02[icol+1]
+				    + src11[icol]+src12[icol+1]
+				    + src21[icol]+src22[icol+1];
+				++icol;
+				++d;
+
+				while (d < D-3) {
+
+					simd4f a = simd4f_uload4(d);
+					a = simd4f_add(a, simd4f_uload4(&src00[icol-1]));
+					a = simd4f_add(a, simd4f_uload4(&src10[icol-1]));
+					a = simd4f_add(a, simd4f_uload4(&src20[icol-1]));
+
+					a = simd4f_add(a, simd4f_uload4(&src01[icol]));
+					a = simd4f_add(a, simd4f_uload4(&src11[icol]));
+					a = simd4f_add(a, simd4f_uload4(&src21[icol]));
+
+					a = simd4f_add(a, simd4f_uload4(&src02[icol+1]));
+					a = simd4f_add(a, simd4f_uload4(&src12[icol+1]));
+					a = simd4f_add(a, simd4f_uload4(&src22[icol+1]));
+
+					simd4f_ustore4(a, d);
+					icol+=4;
+					d+=4;
+				}
+				//while(D
+				while (d < D) {
+					*d += src00[icol-1] + src01[icol] + src02[icol+1]
+					    + src10[icol-1] + src11[icol] + src12[icol+1]
+					    + src20[icol-1] + src21[icol] + src22[icol+1];
+					icol+=stride;
+					++d;
+				}
+				*d += src00[icol-1]+src01[icol]
+				    + src10[icol-1]+src11[icol]
+				    + src20[icol-1]+src21[icol];
+				//krp.process_row(top_data_row, cpu_data + (input_row-1)*width, b_out_channel + 0);
+				//krp.process_row(top_data_row, cpu_data + (input_row)*width, b_out_channel + 3);
+				//krp.process_row(top_data_row, cpu_data + (input_row+1)*width, b_out_channel + 6);
+				input_row+=stride;
+				top_data_row += output_w;
+			}
+			int off = input_row*width;
+			krp.process_row(top_data_row, src00+off, src01+off, src02+off);
+			krp.process_row(top_data_row, src10+off, src11+off, src12+off);
+		}
+
+	private:
+		const int height;
+		const int width;
+		const int stride;
+		const int output_h;
+		const int output_w;
+		const int conv_in_spatial_dim_;
+	};
 	template <typename Dtype>
 	void ConvolutionQLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
 		const Dtype* D = D_.cpu_data();
