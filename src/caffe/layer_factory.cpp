@@ -9,6 +9,7 @@
 #include "caffe/layer_factory.hpp"
 #include "caffe/layers/conv_layer.hpp"
 #include "caffe/layers/conv_q_layer.hpp"
+#include "caffe/layers/conv_q_unpack_layer.hpp"
 #include "caffe/layers/lrn_layer.hpp"
 #include "caffe/layers/pooling_layer.hpp"
 #include "caffe/layers/relu_layer.hpp"
@@ -67,7 +68,7 @@ shared_ptr<Layer<Dtype> > GetConvolutionLayer(
     return shared_ptr<Layer<Dtype> >(new CuDNNConvolutionLayer<Dtype>(param));
 #endif
   } else if (engine == ConvolutionParameter_Engine_QUANT) {
-    return shared_ptr<Layer<Dtype> >(new ConvolutionQLayer<Dtype>(param));
+    return shared_ptr<Layer<Dtype> >(new ConvolutionQUnpackLayer<Dtype>(param));
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
     throw;  // Avoids missing return warning

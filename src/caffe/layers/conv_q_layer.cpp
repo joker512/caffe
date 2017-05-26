@@ -60,7 +60,7 @@ namespace caffe {
 			}
 		}
 	}
-	
+
 	// TODO: SPEC for kernel_w = 5,7 pad_w = 0,1
 	template <int kernel, int pad, typename Dtype> class kernel_row_processor {
 	public:
