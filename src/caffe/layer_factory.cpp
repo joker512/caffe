@@ -68,7 +68,7 @@ shared_ptr<Layer<Dtype> > GetConvolutionLayer(
     return shared_ptr<Layer<Dtype> >(new CuDNNConvolutionLayer<Dtype>(param));
 #endif
   } else if (engine == ConvolutionParameter_Engine_QUANT) {
-    return shared_ptr<Layer<Dtype> >(new ConvolutionQUnpackLayer<Dtype>(param));
+    return shared_ptr<Layer<Dtype> >(new ConvolutionQLayer<Dtype>(param));
   } else {
     LOG(FATAL) << "Layer " << param.name() << " has unknown engine.";
     throw;  // Avoids missing return warning

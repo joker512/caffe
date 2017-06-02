@@ -20,7 +20,7 @@ namespace caffe {
 		const int TOTAL_BITS = 32;
 		const int REST_BITS = TOTAL_BITS - BITS;
 		const int D_DIVIDER = 10000;
-		vector<int> cache_shape_(1, K * conv_in_spatial_dim_);
+		vector<int> cache_shape_(1, K * this->channels_ / M * conv_in_spatial_dim_);
 		cache_.Reshape(cache_shape_);
 
 		const int kernel_h = this->kernel_shape_.cpu_data()[0];
@@ -30,8 +30,7 @@ namespace caffe {
 		if (this->blobs_.size() < 3) {
 			this->blobs_.resize(3);
 			vector<int> d_shape(2);
-			d_shape[0] = K * this->channels_ / M;
-			//d_shape[0] = K * this->channels_ / M / 2;
+			d_shape[0] = K * this->channels_ / M / 2;
 			d_shape[1] = M;
 			this->blobs_[0].reset(new Blob<Dtype>(d_shape));
 			vector<int> b_binary_shape(1, BITS * b_shape_size / (8 * sizeof(Dtype)) + (BITS * b_shape_size % (8 * sizeof(Dtype)) ? 1 : 0));
@@ -43,7 +42,8 @@ namespace caffe {
 				B_.Reshape(b_shape);
 			}
 			unsigned int* B_hash = (unsigned int*)(this->blobs_[2]->cpu_data());
-			int* B = B_.mutable_cpu_data();
+			Blob<int> B_cache(B_.shape());
+			int* B = B_cache.mutable_cpu_data();
 			for (int i = 0, total_bit_shift = 0; i < b_shape_size; ++i, total_bit_shift += BITS) {
 				int byte_shift = total_bit_shift / TOTAL_BITS;
 				int bit_shift = total_bit_shift % TOTAL_BITS;
@@ -52,7 +52,19 @@ namespace caffe {
 										  B_hash[byte_shift] >> shift) & (K - 1);
 			}
 
-			/*if (D_.count() == 0) {
+			for (int slice = 0; slice < this->channels_ / M; ++slice) {
+				const int* B_cache_slice = B + slice * kernel_dim_ * this->num_output_;
+				int* B_slice = B_.mutable_cpu_data() + slice * this->num_output_;
+				for (int out_channel = 0; out_channel < this->num_output_; ++out_channel) {
+					const int* B_cache_slice_out = B_cache_slice + out_channel * kernel_dim_;
+					int* B_slice_out = B_slice + out_channel;
+					for (int khw = 0; khw < kernel_dim_; ++khw) {
+						B_slice_out[khw * this->channels_ / M * this->num_output_] = B_cache_slice_out[khw];
+					}
+				}
+			}
+
+			if (D_.count() == 0) {
 				vector<int> d_binary_shape(1, this->blobs_[0]->count() * 2);
 				D_.Reshape(d_binary_shape);
 			}
@@ -60,22 +72,22 @@ namespace caffe {
 			Dtype* D = D_.mutable_cpu_data();
 			for (int i = 0; i < D_.count(); ++i) {
 				D[i] = 1.f * D_hash[i] / D_DIVIDER;
-			}*/
+			}
 		}
 	}
 
 	template <typename Dtype>
 	void ConvolutionQLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
-		const Dtype* D = this->blobs_[0]->cpu_data();
-		//const Dtype* D = D_.cpu_data();
+		const Dtype* D = D_.cpu_data();
 		// hash with indexes of D columns, each number uses log2(K) bits
 		const int* B = B_.cpu_data();
+		Blob<Dtype> temp_cache;
+		temp_cache.Reshape(cache_.shape());
 
 		const int height = this->conv_input_shape_.cpu_data()[1];
 		const int width = this->conv_input_shape_.cpu_data()[2];
 		const int kernel_h = this->kernel_shape_.cpu_data()[0];
 		const int kernel_w = this->kernel_shape_.cpu_data()[1];
-		const int kernel_dim_ = kernel_h * kernel_w;
 		const int pad_h = this->pad_.cpu_data()[0];
 		const int pad_w = this->pad_.cpu_data()[1];
 		const int stride_h = this->stride_.cpu_data()[0];
@@ -89,6 +101,8 @@ namespace caffe {
 		for (int i = 0; i < bottom.size(); ++i) {
 			const Dtype* bottom_data = bottom[i]->cpu_data();
 			Dtype* top_data = top[i]->mutable_cpu_data();
+			Blob<Dtype> out_cache;
+			out_cache.Reshape(1, this->num_output_, output_h, output_w);
 
 			for (int n = 0; n < this->num_; ++n) {
 				Dtype* top_data_image = &top_data[n * this->top_dim_];
@@ -98,38 +112,69 @@ namespace caffe {
 				for (int slice = 0; slice < this->channels_ / M; ++slice) {
 					caffe_cpu_gemm(CblasNoTrans, CblasNoTrans, K, conv_in_spatial_dim_, M, (Dtype)1.,
 							D + slice * M * K, bottom_data_image + slice * M * conv_in_spatial_dim_, (Dtype)0.,
-							this->cache_.mutable_cpu_data());
-					const int* b_slice = &B[slice * this->num_output_ * kernel_dim_];
+							temp_cache.mutable_cpu_data() + slice * K * conv_in_spatial_dim_);
+				}
 
-					for (int out_channel = 0; out_channel < this->num_output_; ++out_channel) {
-						const int* b_out_channel = &b_slice[out_channel * kernel_dim_];
-						Dtype* top_data_channel = &top_data_image[out_channel * this->conv_out_spatial_dim_];
+				for (int hw = 0; hw < conv_in_spatial_dim_; ++hw) {
+					const Dtype* temp_cache_slice = temp_cache.cpu_data() + hw;
+					Dtype* cache_slice = cache_.mutable_cpu_data() + hw * K * this->channels_ / M;
+					for (int slice = 0; slice < this->channels_ / M; ++slice) {
+						const Dtype* temp_cache_slice_k = temp_cache_slice + slice * K * conv_in_spatial_dim_;
+						Dtype* cache_slice_k = cache_slice + slice * K;
+						for (int j = 0; j < K; ++j) {
+							*cache_slice_k = temp_cache_slice_k[j * conv_in_spatial_dim_];
+							++cache_slice_k;
+						}
+					}
+				}
+
+				for (int output_row = 0; output_row < output_h; ++output_row) {
+					Dtype* top_data_row = out_cache.mutable_cpu_data() + output_row * output_w * this->num_output_;
+
+					for (int output_col = 0; output_col < output_w; ++output_col) {
+						Dtype* top_data_row_col = top_data_row + output_col * this->num_output_;
+						for (int out_channel = 0; out_channel < this->num_output_; ++out_channel)
+							top_data_row_col[out_channel] = (Dtype)0.f;
 
 						for (int kernel_row = 0; kernel_row < kernel_h; ++kernel_row) {
-							const int* b_kernel_row = &b_out_channel[kernel_row * kernel_w];
+							const int* B_row = B + kernel_row * kernel_w * this->num_output_ * this->channels_ / M;
+							const int input_row = -pad_h + kernel_row * dilation_h + output_row * stride_h;
 
-							for (int kernel_col = 0; kernel_col < kernel_w; ++kernel_col) {
-								int b = b_kernel_row[kernel_col];
-								if (K_only != -1 && b != K_only || pos_only != -1 && kernel_row * kernel_w + kernel_col != pos_only)
-									continue;
-								int input_row = -pad_h + kernel_row * dilation_h;
-								const Dtype* cache_row = &this->cache_.cpu_data()[b * conv_in_spatial_dim_];
+							if (static_cast<unsigned>(input_row) < static_cast<unsigned>(height)) {
+								const Dtype* cache_row = cache_.cpu_data() + input_row * width * K * this->channels_ / M;
+								for (int kernel_col = 0; kernel_col < kernel_w; ++kernel_col) {
+									const int* B_row_col = B_row + kernel_col * this->num_output_ * this->channels_ / M;
+									const int input_col = -pad_h + kernel_col * dilation_h + output_col * stride_w;
 
-								for (int output_row = 0; output_row < output_h; ++output_row) {
-									if (static_cast<unsigned>(input_row) < static_cast<unsigned>(height)) {
-										const Dtype* cache_row_row = &cache_row[input_row * width];
-										Dtype* top_data_row = &top_data_channel[output_row * output_w];
-										int input_col = -pad_w + kernel_col * dilation_w;
-										for (int output_col = 0; output_col < output_w; ++output_col) {
-											if (static_cast<unsigned>(input_col) < static_cast<unsigned>(width)) {
-												top_data_row[output_col] += cache_row_row[input_col];
+									if (static_cast<unsigned>(input_col) < static_cast<unsigned>(width)) {
+										const Dtype* cache_row_col = cache_row + input_col * K * this->channels_ / M;
+										for (int slice = 0; slice < this->channels_ / M; ++slice) {
+											const int* B_row_col_slice = B_row_col + slice * this->num_output_;
+											const Dtype* cache_row_col_slice = cache_row_col + slice * K;
+
+											for (int out_channel = 0; out_channel < this->num_output_; ++out_channel) {
+												const int b = B_row_col_slice[out_channel];
+												const Dtype d = cache_row_col_slice[b];
+												top_data_row_col[out_channel] += d;
 											}
-											input_col += stride_w;
 										}
 									}
-									input_row += stride_h;
 								}
 							}
+						}
+					}
+				}
+
+				for (int output_row = 0; output_row < output_h; ++output_row) {
+					const Dtype* out_cache_row = out_cache.cpu_data() + output_row * output_w * this->num_output_;
+					Dtype* top_data_row = top_data_image + output_row * output_w;
+
+					for (int output_col = 0; output_col < output_w; ++output_col) {
+						const Dtype* out_cache_row_col = out_cache_row + output_col * this->num_output_;
+						Dtype* top_data_row_col = top_data_row + output_col;
+
+						for (int out_channel = 0; out_channel < this->num_output_; ++out_channel) {
+							top_data_row_col[out_channel * output_h * output_w] = out_cache_row_col[out_channel];
 						}
 					}
 				}

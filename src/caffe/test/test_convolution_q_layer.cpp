@@ -11,7 +11,7 @@
 namespace caffe {
 
 #ifndef CPU_ONLY
-	extern cudaDeviceProp CAFFE_TEST_CUDA_PROP;
+extern cudaDeviceProp CAFFE_TEST_CUDA_PROP;
 #endif
 
 template <typename TypeParam>
@@ -19,13 +19,18 @@ template <typename TypeParam>
 		typedef typename TypeParam::Dtype Dtype;
 protected:
 	ConvolutionQLayerTest() : blob_bottom_(new Blob<Dtype>(1, 4, 5, 5)), blob_top_(new Blob<Dtype>()),
-		D_(new Blob<Dtype>(1, 1, 2, 4)){
+		D_(new Blob<Dtype>(1, 1, 1, 4)){
+		const int SHORTS_IN_DTYPE = sizeof(Dtype) / 2;
+		short D_src[sizeof(Dtype) / 2];
 		for (int i = 1; i <= 100; ++i) {
 			blob_bottom_->mutable_cpu_data()[i - 1] = Dtype(i);
 		}
-		for (int i = 1; i <= 8; ++i) {
-			D_->mutable_cpu_data()[i - 1] = Dtype(i);
+		for (int i = 0; i < 8; ++i) {
+			D_src[i % SHORTS_IN_DTYPE] = std::min(i - 3, 3) * 10000;
+			if ((i + 1) % SHORTS_IN_DTYPE == 0)
+				D_->mutable_cpu_data()[i / SHORTS_IN_DTYPE] = ((Dtype*)D_src)[0];
 		}
+
 		blob_bottom_vec_.push_back(blob_bottom_);
 		blob_top_vec_.push_back(blob_top_);
 	}
@@ -76,8 +81,8 @@ TYPED_TEST(ConvolutionQLayerTest, TestForward) {
 		layer->Forward(this->blob_bottom_vec_, this->blob_top_vec_);
 		const Dtype *data = this->blob_top_->cpu_data();
 		const int count = this->blob_top_->count();
-		const Dtype correct[] = {3634, 5396, 3482, 6548, 9788, 6424, 4834, 7334, 4888,
-								 4161, 6611, 4745, 6881, 11039, 7723, 4853, 7947, 5525};
+		const Dtype correct[] = {896, 1184, 634, 1589, 2173, 1263, 1035, 1487, 891,
+								 1266, 2079, 1569, 1826, 3147, 2279, 1049, 1998, 1424};
 		for (int i = 0; i < count; ++i) {
 			EXPECT_EQ(data[i], correct[i]);
 		}
