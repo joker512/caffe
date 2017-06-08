@@ -37,12 +37,12 @@ namespace caffe {
 			this->blobs_[2].reset(new Blob<Dtype>(b_binary_shape));
 		}
 		else {
-			if (B_.count() == 0) {
-				vector<int> b_shape(1, b_shape_size);
-				B_.Reshape(b_shape);
+			if (B_ == 0) {
+				B_ = new unsigned char[b_shape_size];
 			}
 			unsigned int* B_hash = (unsigned int*)(this->blobs_[2]->cpu_data());
-			Blob<int> B_cache(B_.shape());
+			vector<int> b_shape(1, b_shape_size);
+			Blob<int> B_cache(b_shape);
 			int* B = B_cache.mutable_cpu_data();
 			for (int i = 0, total_bit_shift = 0; i < b_shape_size; ++i, total_bit_shift += BITS) {
 				int byte_shift = total_bit_shift / TOTAL_BITS;
@@ -54,10 +54,10 @@ namespace caffe {
 
 			for (int slice = 0; slice < this->channels_ / M; ++slice) {
 				const int* B_cache_slice = B + slice * kernel_dim_ * this->num_output_;
-				int* B_slice = B_.mutable_cpu_data() + slice * this->num_output_;
+				unsigned char* B_slice = B_ + slice * this->num_output_;
 				for (int out_channel = 0; out_channel < this->num_output_; ++out_channel) {
 					const int* B_cache_slice_out = B_cache_slice + out_channel * kernel_dim_;
-					int* B_slice_out = B_slice + out_channel;
+					unsigned char* B_slice_out = B_slice + out_channel;
 					for (int khw = 0; khw < kernel_dim_; ++khw) {
 						B_slice_out[khw * this->channels_ / M * this->num_output_] = B_cache_slice_out[khw];
 					}
@@ -80,10 +80,11 @@ namespace caffe {
 	void ConvolutionQLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
 		const Dtype* D = D_.cpu_data();
 		// hash with indexes of D columns, each number uses log2(K) bits
-		const int* B = B_.cpu_data();
+		const unsigned char* B = B_;
 		Blob<Dtype> temp_cache;
 		temp_cache.Reshape(cache_.shape());
 
+		const int slice_num = this->channels_ / M;
 		const int height = this->conv_input_shape_.cpu_data()[1];
 		const int width = this->conv_input_shape_.cpu_data()[2];
 		const int kernel_h = this->kernel_shape_.cpu_data()[0];
@@ -109,7 +110,7 @@ namespace caffe {
 				caffe_set(this->top_dim_, (Dtype)0., top_data_image);
 				const Dtype* bottom_data_image = &bottom_data[n * this->bottom_dim_];
 
-				for (int slice = 0; slice < this->channels_ / M; ++slice) {
+				for (int slice = 0; slice < slice_num; ++slice) {
 					caffe_cpu_gemm(CblasNoTrans, CblasNoTrans, K, conv_in_spatial_dim_, M, (Dtype)1.,
 							D + slice * M * K, bottom_data_image + slice * M * conv_in_spatial_dim_, (Dtype)0.,
 							temp_cache.mutable_cpu_data() + slice * K * conv_in_spatial_dim_);
@@ -117,8 +118,8 @@ namespace caffe {
 
 				for (int hw = 0; hw < conv_in_spatial_dim_; ++hw) {
 					const Dtype* temp_cache_slice = temp_cache.cpu_data() + hw;
-					Dtype* cache_slice = cache_.mutable_cpu_data() + hw * K * this->channels_ / M;
-					for (int slice = 0; slice < this->channels_ / M; ++slice) {
+					Dtype* cache_slice = cache_.mutable_cpu_data() + hw * K * slice_num;
+					for (int slice = 0; slice < slice_num; ++slice) {
 						const Dtype* temp_cache_slice_k = temp_cache_slice + slice * K * conv_in_spatial_dim_;
 						Dtype* cache_slice_k = cache_slice + slice * K;
 						for (int j = 0; j < K; ++j) {
@@ -137,25 +138,52 @@ namespace caffe {
 							top_data_row_col[out_channel] = (Dtype)0.f;
 
 						for (int kernel_row = 0; kernel_row < kernel_h; ++kernel_row) {
-							const int* B_row = B + kernel_row * kernel_w * this->num_output_ * this->channels_ / M;
+							const unsigned char* B_row = B + kernel_row * kernel_w * this->num_output_ * slice_num;
 							const int input_row = -pad_h + kernel_row * dilation_h + output_row * stride_h;
 
 							if (static_cast<unsigned>(input_row) < static_cast<unsigned>(height)) {
-								const Dtype* cache_row = cache_.cpu_data() + input_row * width * K * this->channels_ / M;
+								const Dtype* cache_row = cache_.cpu_data() + input_row * width * K * slice_num;
 								for (int kernel_col = 0; kernel_col < kernel_w; ++kernel_col) {
-									const int* B_row_col = B_row + kernel_col * this->num_output_ * this->channels_ / M;
+									const unsigned char* B_row_col = B_row + kernel_col * this->num_output_ * slice_num;
 									const int input_col = -pad_h + kernel_col * dilation_h + output_col * stride_w;
 
 									if (static_cast<unsigned>(input_col) < static_cast<unsigned>(width)) {
-										const Dtype* cache_row_col = cache_row + input_col * K * this->channels_ / M;
-										for (int slice = 0; slice < this->channels_ / M; ++slice) {
-											const int* B_row_col_slice = B_row_col + slice * this->num_output_;
+										const Dtype* cache_row_col = cache_row + input_col * K * slice_num;
+										for (int slice = 0; slice < slice_num; ++slice) {
+											const unsigned char* B_row_col_slice = B_row_col + slice * this->num_output_;
 											const Dtype* cache_row_col_slice = cache_row_col + slice * K;
+											top_data_row_col = top_data_row + output_col * this->num_output_;
 
-											for (int out_channel = 0; out_channel < this->num_output_; ++out_channel) {
-												const int b = B_row_col_slice[out_channel];
-												const Dtype d = cache_row_col_slice[b];
-												top_data_row_col[out_channel] += d;
+											// attempt to implement the whole cycle on asm, it works the same time
+											/*int num_output = this->num_output_ / 16;
+											asm (
+															 "CYCLE%=:"
+															 "movaps (%1), %%xmm1; movaps (%2), %%xmm1; addps %%xmm0, %%xmm1; movaps %%xmm1, (%1);"
+															 "movaps 16(%1), %%xmm1; movaps 16(%2), %%xmm1; addps %%xmm0, %%xmm1; movaps %%xmm1, 16(%1);"
+															 "movaps 32(%1), %%xmm1; movaps 32(%2), %%xmm1; addps %%xmm0, %%xmm1; movaps %%xmm1, 32(%1);"
+															 "movaps 48(%1), %%xmm1; movaps 48(%2), %%xmm1; addps %%xmm0, %%xmm1; movaps %%xmm1, 48(%1);"
+															 "add $64, %1;"
+															 "add $64, %2;"
+															 "dec %0;"
+															 "jne CYCLE%=;"
+															 : : "r" (num_output), "r" (top_data_row_col), "r" (cache_row_col_slice) : "xmm0", "xmm1", "memory" );*/
+
+											for (int out_channel = 0; out_channel < this->num_output_ / 16; ++out_channel) {
+												Dtype ds[] = {cache_row_col_slice[B_row_col_slice[0]], cache_row_col_slice[B_row_col_slice[1]], cache_row_col_slice[B_row_col_slice[2]],
+																		cache_row_col_slice[B_row_col_slice[3]], cache_row_col_slice[B_row_col_slice[4]], cache_row_col_slice[B_row_col_slice[5]],
+																		cache_row_col_slice[B_row_col_slice[6]], cache_row_col_slice[B_row_col_slice[7]],
+																		cache_row_col_slice[B_row_col_slice[8]], cache_row_col_slice[B_row_col_slice[9]], cache_row_col_slice[B_row_col_slice[10]],
+																		cache_row_col_slice[B_row_col_slice[11]], cache_row_col_slice[B_row_col_slice[12]], cache_row_col_slice[B_row_col_slice[13]],
+																		cache_row_col_slice[B_row_col_slice[14]], cache_row_col_slice[B_row_col_slice[15]]};
+												asm (
+													"movaps (%0), %%xmm0; movaps (%1), %%xmm1; addps %%xmm0, %%xmm1; movaps %%xmm1, (%0);"
+													"movaps 16(%0), %%xmm0; movaps 16(%1), %%xmm1; addps %%xmm0, %%xmm1; movaps %%xmm1, 16(%0);"
+													"movaps 32(%0), %%xmm0; movaps 32(%1), %%xmm1; addps %%xmm0, %%xmm1; movaps %%xmm1, 32(%0);"
+													"movaps 48(%0), %%xmm0; movaps 48(%1), %%xmm1; addps %%xmm0, %%xmm1; movaps %%xmm1, 48(%0);"
+													: : "r" (top_data_row_col), "r" (ds) : "xmm0", "xmm1", "memory" );
+
+												top_data_row_col += 16;
+												B_row_col_slice += 16;
 											}
 										}
 									}

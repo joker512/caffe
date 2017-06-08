@@ -15,6 +15,9 @@ template <typename Dtype>
 class ConvolutionQLayer : public ConvolutionLayer<Dtype> {
 public:
 	explicit ConvolutionQLayer(const LayerParameter& param) : ConvolutionLayer<Dtype>(param) {}
+	~ConvolutionQLayer() {
+		delete[] B_;
+	}
 	//virtual inline const char* type() const { return "Convolution"; }
 
 protected:
@@ -25,7 +28,7 @@ protected:
 
 	Blob<Dtype> cache_;
 	Blob<Dtype> D_;
-	Blob<int> B_;
+	unsigned char* B_ = 0;
 
 private:
 	int conv_out_spatial_dim_;
