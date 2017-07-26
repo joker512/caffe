@@ -101,63 +101,45 @@ void SGDSolver<Dtype>::ClipGradients() {
 template <typename Dtype>
 void SGDSolver<Dtype>::ApplyUpdate() {
   Dtype rate = GetLearningRate();
-  if (this->param_.display() && this->iter_ % this->param_.display() == 0) {
-    LOG(INFO) << "Iteration " << this->iter_ << ", lr = " << rate;
-
-    //display sparsity
-	//const vector<float>& net_params_weight_decay =
-	//	  this->net_->params_weight_decay();
-	//Dtype weight_decay = this->param_.weight_decay();
-	ostringstream sparsity_msg_stream;
-	sparsity_msg_stream << "    Element Sparsity %: \n";
-	for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
-		//Dtype local_decay = weight_decay * net_params_weight_decay[param_id];
-		sparsity_msg_stream << GetSparsity(param_id) <<"\t";
-		//if(local_decay) sparsity_msg_stream << GetSparsity(param_id) <<"\t";
-		//else sparsity_msg_stream << -1 <<"\t";
-	}
-	if (this->param_.print_sparsity())
-		LOG(INFO) << sparsity_msg_stream.str();
-
-	sparsity_msg_stream.str("");
-	sparsity_msg_stream << "     Column Sparsity %: \n";
-	for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
-		//Dtype local_decay = this->param_.kernel_shape_decay() * this->net_->params_kernel_shape_decay()[param_id];
-		sparsity_msg_stream << GetGroupSparsity(param_id, true) <<"\t";
-		//if(local_decay) sparsity_msg_stream << GetGroupSparsity(param_id, true) <<"\t";
-		//else sparsity_msg_stream << -1 <<"\t";
-	}
-	if (this->param_.print_sparsity())
-		LOG(INFO) << sparsity_msg_stream.str();
-
-	sparsity_msg_stream.str("");
-	sparsity_msg_stream << "        Row Sparsity %: \n";
-	for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
-		sparsity_msg_stream << GetGroupSparsity(param_id, false) <<"\t";
-		//if(local_decay) sparsity_msg_stream << GetGroupSparsity(param_id, false) <<"\t";
-		//else sparsity_msg_stream << -1 <<"\t";
-	}
-	if (this->param_.print_sparsity())
-		LOG(INFO) << sparsity_msg_stream.str();
-
-	sparsity_msg_stream.str("");
-	sparsity_msg_stream << "      Block Sparsity %: \n";
-	for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
-		const vector<BlockGroupLassoSpec> net_params_block_group_lasso =
-							 this->net_->params_block_group_lasso()[param_id];
-		for (int blk_idx=0;blk_idx<net_params_block_group_lasso.size();blk_idx++){
-			int xdimen = net_params_block_group_lasso[blk_idx].xdimen();
-			int ydimen = net_params_block_group_lasso[blk_idx].ydimen();
-			sparsity_msg_stream << "("<<xdimen<<","<<ydimen<<"):"<<GetGroupSparsity(param_id, ydimen, xdimen) <<";";
+  if (this->param_.display() && this->iter_ % this->param_.display() == 0 && this->param_.print_sparsity()) {
+		ostringstream sparsity_msg_stream;
+		sparsity_msg_stream << "    Element Sparsity %: \n";
+		for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
+			sparsity_msg_stream << GetSparsity(param_id) <<"\t";
 		}
-		sparsity_msg_stream << "\t";
-	}
-	if (this->param_.print_sparsity())
 		LOG(INFO) << sparsity_msg_stream.str();
 
-    LOG_IF(INFO, Caffe::root_solver()) << "Iteration " << this->iter_
-        << ", lr = " << rate;
-  }
+		sparsity_msg_stream.str("");
+		sparsity_msg_stream << "     Column Sparsity %: \n";
+		for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
+			sparsity_msg_stream << GetGroupSparsity(param_id, true) <<"\t";
+		}
+		LOG(INFO) << sparsity_msg_stream.str();
+
+		sparsity_msg_stream.str("");
+		sparsity_msg_stream << "        Row Sparsity %: \n";
+		for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
+			sparsity_msg_stream << GetGroupSparsity(param_id, false) <<"\t";
+		}
+		LOG(INFO) << sparsity_msg_stream.str();
+
+		sparsity_msg_stream.str("");
+		sparsity_msg_stream << "      Block Sparsity %: \n";
+		for (int param_id = 0; param_id < this->net_->learnable_params().size(); ++param_id) {
+			const vector<BlockGroupLassoSpec> net_params_block_group_lasso =
+								 this->net_->params_block_group_lasso()[param_id];
+			for (int blk_idx=0;blk_idx<net_params_block_group_lasso.size();blk_idx++){
+				int xdimen = net_params_block_group_lasso[blk_idx].xdimen();
+				int ydimen = net_params_block_group_lasso[blk_idx].ydimen();
+				sparsity_msg_stream << "("<<xdimen<<","<<ydimen<<"):"<<GetGroupSparsity(param_id, ydimen, xdimen) <<";";
+			}
+			sparsity_msg_stream << "\t";
+		}
+		LOG(INFO) << sparsity_msg_stream.str();
+
+  	LOG_IF(INFO, Caffe::root_solver()) << "Iteration " << this->iter_
+  	    << ", lr = " << rate;
+	}
 
   ClipGradients();
   Solver<Dtype>::total_regularization_term_ = Dtype(0);
