@@ -537,7 +537,7 @@ namespace caffe {
 	}
 
 #ifdef CPU_ONLY
-STUB_GPU(ConvolutionQLayer);
+//STUB_GPU(ConvolutionQLayer);
 #endif
 
 INSTANTIATE_CLASS(ConvolutionQLayer);
