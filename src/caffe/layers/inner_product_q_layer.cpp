@@ -89,7 +89,7 @@ namespace caffe {
 
         // result of the multiplication of a slice of the source matrix on a D slice
 	
-#define BATCHING
+//#define BATCHING
 //#define INNER_CLOCK
 
 #ifdef BATCHING
